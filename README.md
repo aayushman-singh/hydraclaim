@@ -29,6 +29,18 @@ python -m trustgraph.generate
 python -m trustgraph.ingest data/sessions/deadline_drift.json
 ```
 
+With an LLM endpoint configured (`LLM_API_KEY`, optionally `LLM_BASE_URL`
+and `LLM_MODEL` — defaults are Moonshot/Kimi), the extraction pipeline:
+
+```bash
+# Extract claims offline (no HydraDB needed) and score them against ground truth
+python -m trustgraph.extract data/sessions/deadline_drift.json --emit drafts.json
+python -m trustgraph.evaluate data/sessions/deadline_drift.json drafts.json
+
+# Or run the full pipeline: extract -> reconcile -> write into HydraDB
+python -m trustgraph.pipeline data/sessions/deadline_drift.json
+```
+
 Run the offline test suite (no HydraDB needed):
 
 ```bash
@@ -45,6 +57,11 @@ python -m pytest tests/
   (scripted overwrites, cross-source contradictions, abstention probes)
 - `trustgraph/ingest.py` — writes a scenario into HydraDB as the
   claim/evidence graph (idempotent, batched `UNWIND`)
+- `trustgraph/llm.py` + `trustgraph/extract.py` — LLM claim extraction
+  (grounded quotes, closed predicate vocab, overwrite linking)
+- `trustgraph/reconcile.py` — deterministic supersede/contradict/dedup rules
+- `trustgraph/evaluate.py` — claim-level precision/recall vs. ground truth
+- `trustgraph/pipeline.py` — extract → reconcile → write, per session
 - `trustgraph/schema.py --verify` — probes a live node for the exact
   OpenCypher features this project depends on
 - `scripts/dev-up.sh`, `docker-compose.yml` — local single-node HydraDB
