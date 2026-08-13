@@ -29,24 +29,8 @@ def _llm_classifier(question: str) -> dict:
     ])
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(prog="trustgraph.ask")
-    parser.add_argument("question", help="natural-language question")
-    parser.add_argument("--verbose", "-v", action="store_true",
-                        help="print classification, probe result, and route")
-    parser.add_argument("--llm", action="store_true",
-                        help="use the LLM for question classification")
-    args = parser.parse_args()
-
-    llm_fn = _llm_classifier if args.llm and os.environ.get("LLM_API_KEY") else None
-
-    from trustgraph.config import connect
-    from trustgraph.retrieve import answer
-
-    with connect() as db:
-        result = answer(db, args.question, llm_fn=llm_fn)
-
-    if args.verbose:
+def _print_result(result: dict, verbose: bool) -> None:
+    if verbose:
         print(json.dumps({"route": result["route"],
                           "classification": result["classification"],
                           "probe": result["probe"]}, indent=2))
@@ -55,6 +39,44 @@ def main() -> None:
     for citation in result["citations"]:
         print(f"  [{citation['claim_id']}] {citation['source_kind']}/"
               f"{citation['author']}: \"{citation['quote']}\"")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(prog="trustgraph.ask")
+    parser.add_argument("question", nargs="?",
+                        help="natural-language question (required unless --repl)")
+    parser.add_argument("--verbose", "-v", action="store_true",
+                        help="print classification, probe result, and route")
+    parser.add_argument("--llm", action="store_true",
+                        help="use the LLM for question classification")
+    parser.add_argument("--repl", action="store_true",
+                        help="read questions from stdin in a loop")
+    args = parser.parse_args()
+
+    llm_fn = _llm_classifier if args.llm and os.environ.get("LLM_API_KEY") else None
+
+    from trustgraph.config import connect
+    from trustgraph.retrieve import answer
+
+    if args.repl:
+        with connect() as db:
+            while True:
+                try:
+                    question = input("trustgraph> ")
+                except EOFError:
+                    break
+                if not question.strip():
+                    break
+                _print_result(answer(db, question, llm_fn=llm_fn), args.verbose)
+        return
+
+    if not args.question:
+        parser.error("question is required unless --repl is used")
+
+    with connect() as db:
+        result = answer(db, args.question, llm_fn=llm_fn)
+
+    _print_result(result, args.verbose)
 
 
 if __name__ == "__main__":
