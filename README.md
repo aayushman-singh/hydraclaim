@@ -98,6 +98,9 @@ store.
 
 - [HydraDB](https://github.com/hydra-db/hydradb) — graph database (AGPL v3),
   used as a server via its HTTP query API; not modified or redistributed.
+- [LongMemEval](https://github.com/xiaowu0162/LongMemEval) — benchmark data and
+  question format (MIT License), used as a converter source; dataset files are
+  not copied into or redistributed from this repository.
 - Benchmark shape follows LongMemEval (Wu et al., arXiv:2410.10813).
 
 ## License
