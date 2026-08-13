@@ -76,4 +76,4 @@ that is an allowed edit).
 Files created, test count, and a sample of the markdown table format (from
 your offline test fixture, not a live run).
 
-- [ ] DONE (executing agent: check when merged-ready)
+- [x] DONE (executing agent: check when merged-ready)
