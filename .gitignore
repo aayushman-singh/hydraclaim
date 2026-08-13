@@ -1,0 +1,18 @@
+# Local HydraDB node data (created by scripts/dev-up.sh)
+hydradb-data/
+
+# Generated benchmark data
+data/sessions/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+*.egg-info/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
