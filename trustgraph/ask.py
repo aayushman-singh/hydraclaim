@@ -1,0 +1,61 @@
+"""Query CLI — the demo surface.
+
+    python -m trustgraph.ask "Who owns the payments integration?"
+    python -m trustgraph.ask "What is the current launch deadline?" --verbose
+
+Requires a live HydraDB node populated via ingest or pipeline. Answers are
+deterministic; no LLM key is needed at query time. --llm enables LLM
+question classification (the keyword heuristic is the default).
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+
+
+def _llm_classifier(question: str) -> dict:
+    from trustgraph.llm import chat_json
+
+    return chat_json([
+        {"role": "system", "content": (
+            "Classify the question for a memory system. Respond with strict JSON: "
+            '{"subject": <entity name or null>, "predicate": <one of the memory '
+            "predicates or null>, \"question_type\": <lookup|temporal|conflict|"
+            "knowledge_update|multi_session|abstention>, \"as_of\": <YYYY-MM-DD or "
+            'null>}')},
+        {"role": "user", "content": question},
+    ])
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(prog="trustgraph.ask")
+    parser.add_argument("question", help="natural-language question")
+    parser.add_argument("--verbose", "-v", action="store_true",
+                        help="print classification, probe result, and route")
+    parser.add_argument("--llm", action="store_true",
+                        help="use the LLM for question classification")
+    args = parser.parse_args()
+
+    llm_fn = _llm_classifier if args.llm and os.environ.get("LLM_API_KEY") else None
+
+    from trustgraph.config import connect
+    from trustgraph.retrieve import answer
+
+    with connect() as db:
+        result = answer(db, args.question, llm_fn=llm_fn)
+
+    if args.verbose:
+        print(json.dumps({"route": result["route"],
+                          "classification": result["classification"],
+                          "probe": result["probe"]}, indent=2))
+        print()
+    print(result["answer"])
+    for citation in result["citations"]:
+        print(f"  [{citation['claim_id']}] {citation['source_kind']}/"
+              f"{citation['author']}: \"{citation['quote']}\"")
+
+
+if __name__ == "__main__":
+    main()

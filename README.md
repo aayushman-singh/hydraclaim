@@ -39,6 +39,9 @@ python -m trustgraph.evaluate data/sessions/deadline_drift.json drafts.json
 
 # Or run the full pipeline: extract -> reconcile -> write into HydraDB
 python -m trustgraph.pipeline data/sessions/deadline_drift.json
+
+# Ask questions (routes via the graph probe; no LLM key needed at query time)
+python -m trustgraph.ask "What is the current launch deadline?" --verbose
 ```
 
 Run the offline test suite (no HydraDB needed):
@@ -62,6 +65,13 @@ python -m pytest tests/
 - `trustgraph/reconcile.py` — deterministic supersede/contradict/dedup rules
 - `trustgraph/evaluate.py` — claim-level precision/recall vs. ground truth
 - `trustgraph/pipeline.py` — extract → reconcile → write, per session
+- `trustgraph/probe.py` + `trustgraph/router.py` — two-stage routing
+  (classify → graph probe → FAST / DEEP / ABSTAIN)
+- `trustgraph/scoring.py` — predicate-specific trust scoring for conflicts
+- `trustgraph/retrieve.py` + `trustgraph/ask.py` — retrieval paths,
+  deterministic cited answers, and the demo CLI
+- `docs/tasks/` — self-contained execution specs for the remaining work
+  (benchmark harness, LongMemEval loader, demo polish)
 - `trustgraph/schema.py --verify` — probes a live node for the exact
   OpenCypher features this project depends on
 - `scripts/dev-up.sh`, `docker-compose.yml` — local single-node HydraDB

@@ -104,7 +104,7 @@ def deadline_drift() -> dict:
         "description": "Launch deadline moved twice (meeting -> slack -> meeting); supersession chain of depth 2.",
         "entities": [
             {"name": "product launch", "type": "project",
-             "aliases": ["the launch", "October launch"]},
+             "aliases": ["launch", "the launch", "October launch"]},
             {"name": "Mina Okafor", "type": "person", "aliases": ["Mina", "@mina"]},
         ],
         "events": [
