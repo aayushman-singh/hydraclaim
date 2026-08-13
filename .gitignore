@@ -3,6 +3,7 @@ hydradb-data/
 
 # Generated benchmark data
 data/sessions/
+results/
 
 # Python
 __pycache__/
