@@ -106,3 +106,26 @@ store.
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+## Results
+
+Placeholder for the D4 benchmark numbers. Run the harness described in
+`docs/tasks/T1-benchmark-harness.md` to fill these cells.
+
+| Arm | Overall accuracy | Knowledge-update accuracy | Abstention P/R | Mean queries/question | p95 latency |
+|---|---|---|---|---|---|
+| Always Deep | TBD (run T1) | TBD (run T1) | TBD (run T1) | TBD (run T1) | TBD (run T1) |
+| Question Router | TBD (run T1) | TBD (run T1) | TBD (run T1) | TBD (run T1) | TBD (run T1) |
+| Router + Graph Probe | TBD (run T1) | TBD (run T1) | TBD (run T1) | TBD (run T1) | TBD (run T1) |
+
+## Recording the demo video
+
+Use this checklist to record the ≤3-minute demo video:
+
+- [ ] 0:00–0:20 — Problem: facts change; flat memory returns stale + conflicting chunks.
+- [ ] 0:20–0:50 — Graph model: claims, evidence, SUPERSEDES/CONTRADICTS (show the graph).
+- [ ] 0:50–1:50 — Live demo: run `scripts/demo.sh`.
+- [ ] 1:50–2:30 — Benchmark table + ablation numbers (accuracy vs tokens/latency).
+- [ ] 2:30–3:00 — Why HydraDB: typed edges, property-filtered bitemporal queries, bounded `SUPERSEDES*1..n` traversal, `algo.*paths`; what the project would lose without it.
+
+Keep the final video under 3 minutes and ensure it is legible without audio.
