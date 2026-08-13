@@ -40,7 +40,7 @@ PREDICATES = frozenset(
     }
 )
 
-SOURCE_KINDS = frozenset({"slack", "linear", "meeting"})
+SOURCE_KINDS = frozenset({"slack", "linear", "meeting", "chat"})
 
 QUESTION_TYPES = frozenset(
     {

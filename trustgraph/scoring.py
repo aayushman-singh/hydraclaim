@@ -36,6 +36,7 @@ KIND_DEFAULT: dict[str, float] = {
     "linear": 0.7,
     "meeting": 0.75,
     "slack": 0.5,
+    "chat": 0.5,
     "unknown": 0.4,
 }
 
