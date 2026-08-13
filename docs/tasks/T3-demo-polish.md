@@ -69,4 +69,4 @@ Append two sections:
 
 The demo.sh section list, and a paste of the README Results table.
 
-- [ ] DONE (executing agent: check when merged-ready)
+- [x] DONE (executing agent: check when merged-ready)
