@@ -73,10 +73,13 @@ def router_only_route(question_type: str) -> str:
     return ROUTE_FAST if question_type == "lookup" else ROUTE_DEEP
 
 
-def correct(result: dict, gold_answer: str, qtype: str) -> bool:
+def correct(result: dict, gold_answer: str, qtype: str, rubric: list[str] | None = None) -> bool:
     """Return True when the produced answer matches the gold answer.
 
     - Abstention questions are correct only when the system abstained.
+    - Questions with a rubric are correct when every rubric item appears in
+      the produced answer (rubric = required content, for long-form gold
+      answers where verbatim substring matching is impossible).
     - Other questions are correct when the normalized gold answer appears as a
       substring of the normalized produced answer.
     """
@@ -84,6 +87,8 @@ def correct(result: dict, gold_answer: str, qtype: str) -> bool:
         return result["route"] == "ABSTAIN"
 
     produced = _normalize(result["answer"])
+    if rubric:
+        return all(_normalize(item) in produced for item in rubric)
     gold = _normalize(gold_answer)
     return gold in produced
 
@@ -106,7 +111,11 @@ def run_arm(
     arm: str,
     judge=None,
 ) -> dict:
-    """Run one benchmark arm over the scenario QA pairs."""
+    """Run one benchmark arm over the scenario QA pairs.
+
+    `judge` is a callable (result, gold_answer, qtype, rubric) -> bool;
+    defaults to `correct`.
+    """
     judge = judge or correct
     per_qtype: dict[str, dict[str, int]] = {}
     abstention = {"tp": 0, "fp": 0, "fn": 0}
@@ -162,7 +171,7 @@ def run_arm(
             if qtype == "abstention":
                 if is_abstain:
                     metric["correct"] += 1
-            elif judge(result, gold, qtype):
+            elif judge(result, gold, qtype, qa.get("rubric")):
                 metric["correct"] += 1
 
     return {

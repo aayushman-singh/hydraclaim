@@ -83,6 +83,7 @@ def payments_owner_conflict() -> dict:
                         "on 2026-05-14, but Linear (2026-05-21) still lists Priya Shah. The "
                         "latest explicit handoff says Dario Kim; the Linear record needs "
                         "reconciliation."),
+             "rubric": ["unresolved conflict", "Dario Kim", "Priya Shah"],
              "qtype": "conflict",
              "gold_claim_keys": ["pay-own-2", "pay-own-3"]},
             {"question": "Who owned the payments integration at the start of May?",

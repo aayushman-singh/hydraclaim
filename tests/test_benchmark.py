@@ -210,3 +210,30 @@ def test_run_arm_router_only_treats_refusal_as_abstain():
     assert result["abstention"]["tp"] == 1
     assert result["abstention"]["fn"] == 0
     assert result["per_qtype"]["abstention"]["correct"] == 1
+
+
+def test_correct_with_rubric_requires_all_items():
+    result = {
+        "route": "DEEP",
+        "answer": ("Unresolved conflict about payments integration — owned_by:\n"
+                   "  - Priya Shah — linear/Linear, 2026-05-21\n"
+                   "  - Dario Kim — slack/Dario Kim, 2026-05-14\n"
+                   "The highest-trust record says Priya Shah."),
+    }
+    rubric = ["unresolved conflict", "Dario Kim", "Priya Shah"]
+    assert correct(result, "a long gold sentence that never appears verbatim",
+                   "conflict", rubric)
+
+
+def test_correct_with_rubric_rejects_partial_coverage():
+    result = {
+        "route": "FAST",
+        "answer": "payments integration — owned_by: Priya Shah (as of 2026-05-21)",
+    }
+    rubric = ["unresolved conflict", "Dario Kim", "Priya Shah"]
+    assert not correct(result, "gold", "conflict", rubric)
+
+
+def test_correct_without_rubric_ignores_rubric_logic():
+    result = {"route": "FAST", "answer": "The deadline is 2026-10-17."}
+    assert correct(result, "2026-10-17", "knowledge_update")
