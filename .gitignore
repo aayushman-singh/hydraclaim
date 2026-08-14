@@ -8,6 +8,7 @@ results/
 
 # Generated demo artifacts (large binaries + transient captures)
 demo/*.mp4
+demo/*.png
 demo/*-output.txt
 demo/thumb*.jpg
 demo/test-capture.mp4
