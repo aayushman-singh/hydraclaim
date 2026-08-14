@@ -2,8 +2,9 @@
 
 HydraDB also speaks Bolt 5.x (Neo4j drivers) — the HTTP API keeps this
 project's dependency footprint to httpx only and matches the examples in
-the HydraDB README. Response rows arrive as typed envelopes such as
-{"type": "vertex_id", "value": 2}; `unwrap` normalizes them to plain values.
+the HydraDB README. Responses arrive as `{"columns": [...], "rows": [[...]]}`
+with cells as typed envelopes such as `{"type": "vertex_id", "value": 2}`;
+`query` zips columns with rows and `unwrap` normalizes cells to plain values.
 """
 
 from __future__ import annotations
@@ -61,6 +62,13 @@ class HydraDB:
                 f"cypher: {cypher[:300]}"
             )
         payload = resp.json()
+        if isinstance(payload, dict) and "columns" in payload and "rows" in payload:
+            # Query API shape: rows are positional arrays aligned with columns.
+            columns = payload["columns"]
+            return [
+                {col: unwrap(val) for col, val in zip(columns, row)}
+                for row in payload["rows"]
+            ]
         rows = payload.get("rows", payload) if isinstance(payload, dict) else payload
         if not isinstance(rows, list):
             raise HydraDBError(f"unexpected response shape: {str(payload)[:500]}")

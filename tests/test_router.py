@@ -60,6 +60,11 @@ def test_route_abstains_on_zero_coverage():
     assert decide_route("lookup", _probe(coverage=0)) == ROUTE_ABSTAIN
 
 
+def test_route_abstains_when_predicate_unmapped():
+    # Coverage on other predicates must not count: the graph can't back an answer.
+    assert decide_route("lookup", _probe(predicate=None, coverage=4)) == ROUTE_ABSTAIN
+
+
 def test_route_fast_on_clean_lookup():
     assert decide_route("lookup", _probe()) == ROUTE_FAST
 

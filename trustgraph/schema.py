@@ -17,45 +17,53 @@ from trustgraph.db import HydraDB, HydraDBError
 
 
 def _probes(run: str) -> list[tuple[str, list[str]]]:
-    """(name, statements) pairs; statements run in order, last one is checked."""
+    """(name, statements) pairs; statements run in order, last one is checked.
+
+    Every probe uses only the verified HydraDB v0.1 dialect that the codebase
+    depends on (see trustgraph/model.py): integer node ids, scalar properties,
+    one-hop CREATE patterns whose endpoints upsert by `id`, label/property-
+    scoped MATCH, and no IS NULL / length() / undirected matches.
+    """
+    base = (int(run, 16) % 10**9) * 100  # unique integer id space per run
+    a, b, c, d, e, f = (base + i for i in range(1, 7))
+    run_int = base
     return [
-        ("round-trip create + match", [
-            f"CREATE (a:TGProbe {{run: '{run}', id: '{run}-rt-a', v: 1}})"
-            f"-[:LINK]->(b:TGProbe {{run: '{run}', id: '{run}-rt-b', v: 2}})",
-            f"MATCH (a:TGProbe {{id: '{run}-rt-a'}})-[:LINK]->(b) RETURN b.v AS v",
+        ("one-hop CREATE + read back", [
+            f"CREATE (x:TGProbe {{run: {run_int}, id: {a}, name: '{run}-a', v: 1}})"
+            f"-[:LINK]->(y:TGProbe {{run: {run_int}, id: {b}, v: 2}})",
+            f"MATCH (x:TGProbe {{id: {a}}})-[:LINK]->(y) RETURN y.v AS v",
         ]),
-        ("batched UNWIND create", [
-            f"UNWIND [{{id: '{run}-uw-a', v: 1}}, {{id: '{run}-uw-b', v: 2}}] AS row "
-            f"CREATE (n:TGProbe {{run: '{run}', id: row.id, v: row.v}})",
-            f"MATCH (n:TGProbe {{run: '{run}', id: '{run}-uw-b'}}) RETURN n.v AS v",
+        ("upsert by integer id (re-CREATE is idempotent)", [
+            f"CREATE (x:TGProbe {{id: {a}}})-[:LINK]->(y:TGProbe {{id: {b}}})",
+            f"MATCH (n:TGProbe {{run: {run_int}}}) RETURN count(n.id) AS c",
         ]),
-        ("property range filter (bitemporal reads)", [
-            f"MATCH (n:TGProbe {{run: '{run}'}}) WHERE n.id <= '{run}-rt-b' "
-            "RETURN count(n) AS c",
+        ("string equality in WHERE over an edge pattern", [
+            f"MATCH (x:TGProbe)-[:LINK]->(y:TGProbe) WHERE x.name = '{run}-a' "
+            "RETURN x.id AS id",
         ]),
-        ("bounded variable-length path (SUPERSEDES*1..5)", [
-            f"UNWIND [{{a: '{run}-ch-1', b: '{run}-ch-2'}}, "
-            f"{{a: '{run}-ch-2', b: '{run}-ch-3'}}] AS row "
-            f"CREATE (x:TGProbe {{run: '{run}', id: row.a}})"
-            f"-[:NEXT]->(y:TGProbe {{run: '{run}', id: row.b}})",
-            f"MATCH p=(a:TGProbe {{id: '{run}-ch-1'}})-[:NEXT*1..5]->(x) RETURN x.id AS id",
+        ("bounded variable-length path (SUPERSEDES*1..5 shape)", [
+            f"CREATE (x:TGProbe {{id: {b}}})-[:NEXT]->(y:TGProbe "
+            f"{{run: {run_int}, id: {c}, v: 3}})",
+            f"CREATE (x:TGProbe {{id: {c}}})-[:NEXT]->(y:TGProbe "
+            f"{{run: {run_int}, id: {d}, v: 4}})",
+            f"MATCH p=(x:TGProbe {{id: {b}}})-[:NEXT*1..5]->(y) RETURN y.id AS id",
         ]),
         ("OPTIONAL MATCH", [
-            f"MATCH (n:TGProbe {{id: '{run}-rt-a'}}) "
+            f"MATCH (n:TGProbe {{id: {a}}}) "
             "OPTIONAL MATCH (n)-[:MISSING]->(m) RETURN m.id AS mid",
         ]),
-        ("aggregation", [
-            f"MATCH (n:TGProbe {{run: '{run}'}}) RETURN count(n) AS c",
+        ("aggregation count(*) over an edge pattern", [
+            f"MATCH (x:TGProbe {{id: {a}}})-[:LINK]->(y:TGProbe {{id: {b}}}) "
+            "RETURN count(*) AS c",
         ]),
         ("SET update", [
-            f"MATCH (n:TGProbe {{id: '{run}-rt-a'}}) SET n.flag = true",
-            f"MATCH (n:TGProbe {{id: '{run}-rt-a'}}) RETURN n.flag AS flag",
+            f"MATCH (n:TGProbe {{id: {a}}}) SET n.flag = true",
+            f"MATCH (n:TGProbe {{id: {a}}}) RETURN n.flag AS flag",
         ]),
-        ("UNWIND + MATCH edge create (ingest edge pattern)", [
-            f"UNWIND [{{a: '{run}-rt-a', b: '{run}-rt-b'}}] AS row "
-            "MATCH (x:TGProbe {id: row.a}), (y:TGProbe {id: row.b}) "
-            "CREATE (x)-[:TAGGED]->(y)",
-            f"MATCH (x:TGProbe {{id: '{run}-rt-a'}})-[:TAGGED]->(y) RETURN y.id AS id",
+        ("label/property-scoped DETACH DELETE (reset pattern)", [
+            f"CREATE (x:TGProbe {{run: {run_int}, id: {e}}})"
+            f"-[:TMP]->(y:TGProbe {{run: {run_int}, id: {f}}})",
+            f"MATCH (n:TGProbe {{id: {e}}}) DETACH DELETE n",
         ]),
     ]
 
@@ -75,7 +83,8 @@ def verify(db: HydraDB) -> bool:
             detail = str(exc).splitlines()[0][:160]
             print(f"FAIL  {name}: {detail}")
     try:
-        db.query(f"MATCH (n:TGProbe {{run: '{run}'}}) DETACH DELETE n")
+        run_int = (int(run, 16) % 10**9) * 100
+        db.query(f"MATCH (n:TGProbe {{run: {run_int}}}) DETACH DELETE n")
         print("cleanup: probe nodes deleted")
     except HydraDBError as exc:
         print(f"cleanup: FAILED (probe nodes with run '{run}' left behind): {exc}")

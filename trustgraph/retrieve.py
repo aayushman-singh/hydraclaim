@@ -17,6 +17,7 @@ history uses a single-type varlen path and client-side ordering, since
 
 from __future__ import annotations
 
+import re
 from dataclasses import asdict
 from datetime import datetime, timezone
 
@@ -108,6 +109,22 @@ def abstain_message(subject: str, predicate: str | None) -> str:
             f"all claims about that entity and found none.")
 
 
+def abstain_uncovered_message(subject: str, available: list[str]) -> str:
+    """Abstain when the question maps to no tracked predicate but the subject
+    has claims: say what the graph CAN answer about the subject."""
+    if not available:
+        return abstain_message(subject, None)
+    tracked = ", ".join(available)
+    return (f"I don't have a recorded fact that answers that about '{subject}'. "
+            f"The claims I track for '{subject}' cover: {tracked} — none of those "
+            f"match the question, so the answer is not in the history.")
+
+
+# Origin questions ("when was X first set?") ask for the earliest claim in the
+# history, not the latest active one.
+_ORIGIN_RE = re.compile(r"\b(first|originally|initially|earliest)\b", re.IGNORECASE)
+
+
 def build_fast_answer(claim: dict) -> str:
     return (
         f"{claim['subject']} — {claim['predicate']}: {claim['value']} "
@@ -170,8 +187,13 @@ def answer(
     base = {"classification": asdict(cls), "probe": asdict(p)}
 
     if route == ROUTE_ABSTAIN:
-        return {**base, "route": route,
-                "answer": abstain_message(cls.subject, cls.predicate), "citations": []}
+        if cls.predicate is None and p.coverage:
+            active_any = fetch_claims(db, cls.subject, None, active_only=True)
+            available = sorted({r["predicate"] for r in active_any})
+            msg = abstain_uncovered_message(cls.subject, available)
+        else:
+            msg = abstain_message(cls.subject, cls.predicate)
+        return {**base, "route": route, "answer": msg, "citations": []}
 
     active = fetch_claims(db, cls.subject, cls.predicate, active_only=True,
                           as_of=cls.as_of)
@@ -181,6 +203,15 @@ def answer(
                            " (Claims exist in history, but none are currently active"
                            + (f" as of {cls.as_of}." if cls.as_of else ".")),
                 "citations": []}
+
+    if cls.predicate and _ORIGIN_RE.search(question):
+        history = fetch_claims(db, cls.subject, cls.predicate)
+        if history:
+            oldest = min(history,
+                         key=lambda r: (r["valid_from"], str(r.get("key") or r["id"])))
+            return {**base, "route": route,
+                    "answer": build_fast_answer(oldest),
+                    "citations": [_citation(oldest)]}
 
     if route == ROUTE_FAST:
         return {**base, "route": route, "answer": build_fast_answer(active[0]),
