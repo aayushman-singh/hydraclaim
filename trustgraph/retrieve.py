@@ -8,6 +8,11 @@ Three routes (chosen by router.decide_route over probe.probe):
 
 Answers are composed deterministically so the system is fully demoable
 without an LLM at query time; every claim used comes back in `citations`.
+
+Dialect notes (verified D1): aliases are pipe-delimited strings split
+client-side; open validity is `valid_to = ''` (IS NULL unsupported); chain
+history uses a single-type varlen path and client-side ordering, since
+`length(p)` is unsupported.
 """
 
 from __future__ import annotations
@@ -17,6 +22,7 @@ from datetime import datetime, timezone
 
 from trustgraph.cypher import to_cypher_literal as lit
 from trustgraph.db import HydraDB
+from trustgraph.model import split_aliases
 from trustgraph.probe import probe
 from trustgraph.router import (
     ROUTE_ABSTAIN,
@@ -30,7 +36,8 @@ from trustgraph.scoring import rank_claims
 
 
 def fetch_entities(db: HydraDB) -> list[dict]:
-    return db.query("MATCH (e:Entity) RETURN e.name AS name, e.aliases AS aliases")
+    rows = db.query("MATCH (e:Entity) RETURN e.name AS name, e.aliases AS aliases")
+    return [{"name": r["name"], "aliases": split_aliases(r.get("aliases"))} for r in rows]
 
 
 def fetch_claims(
@@ -42,7 +49,7 @@ def fetch_claims(
     as_of: str | None = None,
     limit: int = 25,
 ) -> list[dict]:
-    clauses = [f"(e.name = {lit(subject)} OR {lit(subject)} IN e.aliases)"]
+    clauses = [f"e.name = {lit(subject)}"]
     if predicate:
         clauses.append(f"c.predicate = {lit(predicate)}")
     if active_only:
@@ -50,13 +57,14 @@ def fetch_claims(
     if as_of:
         clauses.append(
             f"(c.recorded_at <= {lit(as_of)} "
-            f"AND (c.valid_to IS NULL OR c.valid_to > {lit(as_of)}))"
+            f"AND (c.valid_to = '' OR c.valid_to > {lit(as_of)}))"
         )
     return db.query(f"""
 MATCH (c:Claim)-[:ABOUT]->(e:Entity)
 WHERE {" AND ".join(clauses)}
 OPTIONAL MATCH (c)-[:SUPPORTED_BY]->(ev:Evidence)-[:FROM]->(s:Source)
-RETURN c.id AS id, e.name AS subject, c.predicate AS predicate, c.value AS value,
+RETURN c.id AS id, c.key AS key, e.name AS subject, c.predicate AS predicate,
+       c.value AS value,
        c.valid_from AS valid_from, c.valid_to AS valid_to, c.status AS status,
        c.confidence AS confidence,
        ev.quote AS quote, ev.explicitness AS explicitness,
@@ -66,20 +74,22 @@ ORDER BY c.valid_from DESC
 LIMIT {int(limit)}""")
 
 
-def fetch_chain(db: HydraDB, claim_id: str) -> list[dict]:
-    """Supersession history behind a claim, nearest ancestor first."""
-    return db.query(f"""
-MATCH p = (c:Claim {{id: {lit(claim_id)}}})-[:SUPERSEDES*1..5]->(older:Claim)
-RETURN older.id AS id, older.value AS value, older.valid_from AS valid_from,
-       older.valid_to AS valid_to, length(p) AS hops
-ORDER BY hops""")
+def fetch_chain(db: HydraDB, claim_id: int) -> list[dict]:
+    """Supersession history behind a claim, nearest ancestor first (client-side
+    ordering by valid_from — `length(p)` is unsupported in this dialect)."""
+    rows = db.query(f"""
+MATCH p = (c:Claim {{id: {int(claim_id)}}})-[:SUPERSEDES*1..5]->(older:Claim)
+RETURN older.id AS id, older.value AS value,
+       older.valid_from AS valid_from, older.valid_to AS valid_to""")
+    rows.sort(key=lambda r: r["valid_from"], reverse=True)
+    return rows
 
 
 # --- deterministic answer builders (pure, unit-tested) ----------------------
 
 def _citation(claim: dict) -> dict:
     return {
-        "claim_id": claim["id"],
+        "claim_id": claim.get("key") or claim["id"],
         "value": claim["value"],
         "valid_from": claim["valid_from"],
         "valid_to": claim.get("valid_to"),
@@ -177,7 +187,6 @@ def answer(
                 "citations": [_citation(active[0])]}
 
     # DEEP: pull the full conflict subgraph.
-    all_claims = fetch_claims(db, cls.subject, cls.predicate)
     conflicts = p.conflicts > 0 or p.distinct_active_values > 1
     if conflicts:
         ranked = rank_claims(active, cls.predicate or "", now)

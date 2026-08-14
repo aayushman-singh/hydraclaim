@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 
 from trustgraph.cypher import to_cypher_literal as lit
 from trustgraph.db import HydraDB
-from trustgraph.ingest import _unwind, slug
+from trustgraph.model import entity_key, entity_props, graph_id
 
 
 def _norm(value: object) -> str:
@@ -135,83 +135,48 @@ def plan_writes(
 
 
 def apply_plan(db: HydraDB, plan: dict, scenario_id: str) -> dict:
-    """Write a plan into HydraDB (claims, evidence, sources, edges, closures)."""
+    """Write a plan into HydraDB (claims, evidence, sources, edges, closures).
+
+    Uses the same verified-dialect write path as ingest.py: one-hop upsert
+    CREATEs, id-only endpoint references for existing nodes.
+    """
+    from trustgraph.ingest import _props, edge_exists, node_exists, write_claim
+
     recorded_at = datetime.now(timezone.utc).isoformat()
     stats = {"scenario": scenario_id, "created": 0, "entities_created": 0,
              "superseded": len(plan["supersede"]), "contradicted": len(plan["contradict"]),
              "duplicates": plan["duplicates"], "warnings": plan["warnings"]}
 
-    rows = []
     for draft in plan["create"]:
         cid = draft["id"]
-        entity_id = f"{scenario_id}:{slug(draft['subject'])}"
-        if not db.node_exists("Entity", entity_id):
-            db.query(
-                "CREATE (e:Entity {id: %s, name: %s, type: 'unknown', aliases: []})"
-                % (lit(entity_id), lit(draft["subject"]))
-            )
+        ekey = entity_key(scenario_id, draft["subject"])
+        if node_exists(db, "Entity", ekey):
+            endpoint = f"{{id: {graph_id(ekey)}}}"
+        else:
+            endpoint = _props(entity_props(scenario_id, draft["subject"]))
             stats["entities_created"] += 1
-        rows.append({
-            "cid": cid,
-            "predicate": draft["predicate"],
-            "value": draft["value"],
-            "valid_from": draft["valid_from"],
-            "valid_to": draft.get("valid_to"),
-            "recorded_at": recorded_at,
-            "status": draft.get("status", "active"),
-            "confidence": draft["confidence"],
-            "evid": f"{cid}:ev0",
-            "quote": draft["quote"],
-            "ts": draft["valid_from"],
-            "session_id": draft["session_id"],
-            "msg_id": draft["msg_id"],
-            "extraction_confidence": draft["confidence"],
-            "explicitness": draft["explicitness"],
-            "entity_id": entity_id,
-            "source_id": f"{draft['source_kind']}:{draft['author']}",
-            "source_kind": draft["source_kind"],
-            "source_author": draft["author"],
-        })
-
-    sources: dict[str, dict] = {}
-    for row in rows:
-        sources.setdefault(row["source_id"], {
-            "id": row["source_id"], "kind": row["source_kind"], "author": row["source_author"],
-        })
-    for src in sources.values():
-        if not db.node_exists("Source", src["id"]):
-            db.query(
-                "CREATE (s:Source {id: %s, kind: %s, author: %s})"
-                % (lit(src["id"]), lit(src["kind"]), lit(src["author"]))
-            )
-
-    _unwind(db, rows, """
-CREATE (c:Claim {id: row.cid, predicate: row.predicate, value: row.value,
-                 valid_from: row.valid_from, valid_to: row.valid_to,
-                 recorded_at: row.recorded_at, status: row.status,
-                 confidence: row.confidence})
-CREATE (ev:Evidence {id: row.evid, quote: row.quote, ts: row.ts,
-                     session_id: row.session_id, msg_id: row.msg_id,
-                     extraction_confidence: row.extraction_confidence,
-                     explicitness: row.explicitness})
-CREATE (c)-[:SUPPORTED_BY]->(ev)""")
-    _unwind(db, rows, """
-MATCH (c:Claim {id: row.cid}), (e:Entity {id: row.entity_id})
-CREATE (c)-[:ABOUT]->(e)""")
-    _unwind(db, rows, """
-MATCH (ev:Evidence {id: row.evid}), (s:Source {id: row.source_id})
-CREATE (ev)-[:FROM]->(s)""")
-    stats["created"] = len(rows)
+        write_claim(db, cid, draft, endpoint, recorded_at)
+        stats["created"] += 1
 
     # Supersession edges + closure of the overwritten claims.
-    _unwind(db, plan["supersede"], """
-MATCH (new:Claim {id: row.new_id}), (old:Claim {id: row.old_id})
-CREATE (new)-[:SUPERSEDES {at: row.at}]->(old)""")
-    _unwind(db, plan["supersede"], """
-MATCH (old:Claim {id: row.old_id})
-SET old.valid_to = row.at, old.status = 'superseded'""")
+    for edge in plan["supersede"]:
+        new_id, old_id = graph_id(edge["new_id"]), graph_id(edge["old_id"])
+        if not edge_exists(db, "Claim", new_id, "SUPERSEDES", "Claim", old_id):
+            db.query(
+                f"CREATE (new:Claim {{id: {new_id}}})"
+                f"-[:SUPERSEDES {{at: {lit(edge['at'])}}}]->(old:Claim {{id: {old_id}}})"
+            )
+        db.query(
+            f"MATCH (old:Claim {{id: {old_id}}}) "
+            f"SET old.valid_to = {lit(edge['at'])}, old.status = 'superseded'"
+        )
 
-    _unwind(db, [{**e, "detected_at": recorded_at} for e in plan["contradict"]], """
-MATCH (a:Claim {id: row.a_id}), (b:Claim {id: row.b_id})
-CREATE (a)-[:CONTRADICTS {resolved: false, detected_at: row.detected_at}]->(b)""")
+    for edge in plan["contradict"]:
+        a_id, b_id = graph_id(edge["a_id"]), graph_id(edge["b_id"])
+        if not edge_exists(db, "Claim", a_id, "CONTRADICTS", "Claim", b_id):
+            db.query(
+                f"CREATE (a:Claim {{id: {a_id}}})"
+                f"-[:CONTRADICTS {{resolved: false, detected_at: {lit(recorded_at)}}}]"
+                f"->(b:Claim {{id: {b_id}}})"
+            )
     return stats

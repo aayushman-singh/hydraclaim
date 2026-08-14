@@ -2,11 +2,13 @@
 
 The probe is what makes routing defensible: decisions are driven by measured
 graph state (coverage, conflict count, distinct active values, supersession
-depth), not by question phrasing. Probe queries use no LLM and return counts,
-so the routing cost is a handful of indexed lookups.
+depth), not by question phrasing.
 
-Note on conflicts: each CONTRADICTS edge is created once (sorted pair) but an
-undirected MATCH sees it from both ends, so `count(r)` is halved.
+Dialect notes (verified D1): undirected edge matches are unsupported, so
+CONTRADICTS edges are read directed (they are created exactly once per pair);
+`length(p)` and `max()` don't exist, so chain depth is computed client-side
+from the SUPERSEDES edge list. Edge lists are scanned whole-graph — fine at
+demo/benchmark scale (thousands of edges); page by label if that changes.
 """
 
 from __future__ import annotations
@@ -22,53 +24,67 @@ class ProbeResult:
     subject: str
     predicate: str | None
     coverage: int                  # claims for (subject[, predicate]), any status
-    conflicts: int                 # unresolved CONTRADICTS edges on active claims
+    conflicts: int                 # unresolved CONTRADICTS edges touching active claims
     distinct_active_values: int    # >1 means active disagreement even without edges
     chain_depth: int               # longest SUPERSEDES chain among matching claims
 
 
-def _where(subject: str, predicate: str | None, active_only: bool = False) -> str:
-    clauses = [f"(e.name = {lit(subject)} OR {lit(subject)} IN e.aliases)"]
-    if predicate:
-        clauses.append(f"c.predicate = {lit(predicate)}")
-    if active_only:
-        clauses.append("c.status = 'active'")
-    return " AND ".join(clauses)
+def _chain_depth(edges: list[tuple[int, int]], ids: set[int]) -> int:
+    """Longest path length (in edges) through the SUPERSEDES DAG, client-side."""
+    forward: dict[int, list[int]] = {}
+    for new_id, old_id in edges:
+        if new_id in ids and old_id in ids:
+            forward.setdefault(new_id, []).append(old_id)
+
+    memo: dict[int, int] = {}
+
+    def depth(node: int) -> int:
+        if node not in memo:
+            memo[node] = max((1 + depth(child) for child in forward.get(node, [])),
+                             default=0)
+        return memo[node]
+
+    return max((depth(n) for n in forward), default=0)
 
 
 def probe(db: HydraDB, subject: str, predicate: str | None) -> ProbeResult:
-    where = _where(subject, predicate)
+    clauses = [f"e.name = {lit(subject)}"]
+    if predicate:
+        clauses.append(f"c.predicate = {lit(predicate)}")
+    rows = db.query(f"""
+MATCH (c:Claim)-[:ABOUT]->(e:Entity)
+WHERE {" AND ".join(clauses)}
+RETURN c.id AS id, c.status AS status, c.value AS value""")
 
-    row = db.query_one(
-        f"MATCH (c:Claim)-[:ABOUT]->(e:Entity) WHERE {where} RETURN count(c) AS n"
+    coverage = len(rows)
+    active_ids = {int(r["id"]) for r in rows if r.get("status") == "active"}
+    distinct_values = len(
+        {str(r.get("value", "")).strip().lower() for r in rows if int(r["id"]) in active_ids}
     )
-    coverage = int((row or {}).get("n", 0))
 
     conflicts = 0
-    distinct_values = 0
     chain_depth = 0
     if predicate and coverage:
-        active_where = _where(subject, predicate, active_only=True)
-        row = db.query_one(f"""
-MATCH (a:Claim)-[:ABOUT]->(e:Entity)
-WHERE {active_where.replace('c.', 'a.')}
-MATCH (a)-[r:CONTRADICTS]-(b:Claim)
-WHERE r.resolved = false
-RETURN count(r) AS n""")
-        conflicts = int((row or {}).get("n", 0)) // 2
+        claim_ids = {int(r["id"]) for r in rows}
+        sup_edges = [
+            (int(r["new_id"]), int(r["old_id"]))
+            for r in db.query(
+                "MATCH (a:Claim)-[:SUPERSEDES]->(b:Claim) "
+                "RETURN a.id AS new_id, b.id AS old_id"
+            )
+        ]
+        chain_depth = _chain_depth(sup_edges, claim_ids)
 
-        rows = db.query(f"""
-MATCH (c:Claim)-[:ABOUT]->(e:Entity)
-WHERE {active_where}
-RETURN c.value AS value""")
-        distinct_values = len({str(r.get("value", "")).strip().lower() for r in rows})
-
-        rows = db.query(f"""
-MATCH (newer:Claim)-[:ABOUT]->(e:Entity)
-WHERE {_where(subject, predicate).replace('c.', 'newer.')}
-MATCH p = (newer)-[:SUPERSEDES*1..5]->(older:Claim)
-RETURN length(p) AS hops""")
-        chain_depth = max((int(r["hops"]) for r in rows), default=0)
+        con_rows = db.query(
+            "MATCH (a:Claim)-[r:CONTRADICTS]->(b:Claim) "
+            "RETURN a.id AS a_id, b.id AS b_id, r.resolved AS resolved"
+        )
+        conflicts = len({
+            tuple(sorted((int(r["a_id"]), int(r["b_id"]))))
+            for r in con_rows
+            if not r.get("resolved", False)
+            and (int(r["a_id"]) in active_ids or int(r["b_id"]) in active_ids)
+        })
 
     return ProbeResult(
         subject=subject,
