@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import re
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 
@@ -25,8 +26,14 @@ QTYPE_MAP = {
 
 
 def _parse_date(value: str) -> date:
-    """Accept both ``YYYY/MM/DD`` and ``YYYY-MM-DD``."""
-    return date.fromisoformat(value.replace("/", "-"))
+    """Accept ``YYYY/MM/DD``, ``YYYY-MM-DD``, and datetime strings like
+    ``2023-05-25 (Thu) 14:48``."""
+    value = value.strip()
+    # Take the first YYYY-MM-DD or YYYY/MM/DD fragment.
+    m = re.search(r"\d{4}[/-]\d{2}[/-]\d{2}", value)
+    if not m:
+        raise ValueError(f"cannot parse date from {value!r}")
+    return date.fromisoformat(m.group(0).replace("/", "-"))
 
 
 def _map_qtype(question_type: str) -> str:
@@ -74,6 +81,8 @@ def convert_instance(instance: dict) -> dict:
         )
 
     qtype = _map_qtype(instance.get("question_type", ""))
+    if qid.endswith("_abs"):
+        qtype = "abstention"
     qa = {
         "question": instance["question"],
         "answer": instance["answer"],
@@ -102,7 +111,7 @@ def estimate_tokens(doc: dict) -> int:
 def sample_instances(
     instances: list[dict], n: int, seed: int, per_type_cap: int
 ) -> list[dict]:
-    """Deterministic stratified sample by ``question_type``.
+    """Deterministic stratified sample by mapped TrustGraph question type.
 
     For each type (in sorted order), the instances are shuffled with
     ``random.Random(seed)`` and up to ``per_type_cap`` are selected.  If the
@@ -112,7 +121,10 @@ def sample_instances(
     rng = random.Random(seed)
     groups: dict[str, list[dict]] = {}
     for inst in instances:
-        groups.setdefault(inst.get("question_type", ""), []).append(inst)
+        qtype = _map_qtype(inst.get("question_type", ""))
+        if inst.get("question_id", "").endswith("_abs"):
+            qtype = "abstention"
+        groups.setdefault(qtype, []).append(inst)
 
     selected: list[dict] = []
     leftovers: list[dict] = []
