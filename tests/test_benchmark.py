@@ -237,3 +237,45 @@ def test_correct_with_rubric_rejects_partial_coverage():
 def test_correct_without_rubric_ignores_rubric_logic():
     result = {"route": "FAST", "answer": "The deadline is 2026-10-17."}
     assert correct(result, "2026-10-17", "knowledge_update")
+
+
+def test_naive_answer_abstains_when_subject_missing():
+    from trustgraph.benchmark import naive_answer, ROUTE_NAIVE_RAG
+
+    class _EmptyDB:
+        def query(self, cypher, consistency="causal"):
+            return []
+
+    roster = [{"name": "product launch", "aliases": ["launch"]}]
+    result = naive_answer(CountingDB(_EmptyDB()), "What is the coffee budget?", roster)
+    assert result["route"] == ROUTE_NAIVE_RAG
+    assert "No subject matched" in result["answer"]
+
+
+def test_naive_answer_returns_top_overlapping_claim():
+    from trustgraph.benchmark import naive_answer, ROUTE_NAIVE_RAG
+
+    class _ClaimDB:
+        def query(self, cypher, consistency="causal"):
+            return [
+                {"predicate": "deadline", "value": "2026-10-17", "status": "active", "valid_from": "2026-05-18"},
+                {"predicate": "deadline", "value": "2026-10-03", "status": "active", "valid_from": "2026-05-05"},
+            ]
+
+    roster = [{"name": "product launch", "aliases": ["launch"]}]
+    result = naive_answer(CountingDB(_ClaimDB()), "What is the current launch deadline?", roster)
+    assert result["route"] == ROUTE_NAIVE_RAG
+    assert "2026-10-17" in result["answer"]
+
+
+def test_naive_answer_abstains_when_no_active_claims():
+    from trustgraph.benchmark import naive_answer, ROUTE_NAIVE_RAG
+
+    class _EmptyClaimDB:
+        def query(self, cypher, consistency="causal"):
+            return []
+
+    roster = [{"name": "product launch", "aliases": ["launch"]}]
+    result = naive_answer(CountingDB(_EmptyClaimDB()), "What is the launch deadline?", roster)
+    assert result["route"] == ROUTE_NAIVE_RAG
+    assert "No active claims" in result["answer"]
