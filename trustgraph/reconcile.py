@@ -134,11 +134,15 @@ def plan_writes(
     }
 
 
-def apply_plan(db: HydraDB, plan: dict, scenario_id: str) -> dict:
+def apply_plan(db: HydraDB, plan: dict, scenario_id: str,
+               entities: list[dict] | None = None) -> dict:
     """Write a plan into HydraDB (claims, evidence, sources, edges, closures).
 
     Uses the same verified-dialect write path as ingest.py: one-hop upsert
     CREATEs, id-only endpoint references for existing nodes.
+
+    `entities` is the scenario roster; aliases are used when creating an
+    entity node for the first time.
     """
     from trustgraph.ingest import _props, edge_exists, node_exists, write_claim
 
@@ -146,6 +150,7 @@ def apply_plan(db: HydraDB, plan: dict, scenario_id: str) -> dict:
     stats = {"scenario": scenario_id, "created": 0, "entities_created": 0,
              "superseded": len(plan["supersede"]), "contradicted": len(plan["contradict"]),
              "duplicates": plan["duplicates"], "warnings": plan["warnings"]}
+    entity_lookup = {e["name"].strip(): e for e in (entities or [])}
 
     for draft in plan["create"]:
         cid = draft["id"]
@@ -153,7 +158,15 @@ def apply_plan(db: HydraDB, plan: dict, scenario_id: str) -> dict:
         if node_exists(db, "Entity", ekey):
             endpoint = f"{{id: {graph_id(ekey)}}}"
         else:
-            endpoint = _props(entity_props(scenario_id, draft["subject"]))
+            rost = entity_lookup.get(draft["subject"].strip())
+            endpoint = _props(
+                entity_props(
+                    scenario_id,
+                    draft["subject"],
+                    draft.get("type", rost.get("type", "unknown") if rost else "unknown"),
+                    rost.get("aliases", []) if rost else [],
+                )
+            )
             stats["entities_created"] += 1
         write_claim(db, cid, draft, endpoint, recorded_at)
         stats["created"] += 1

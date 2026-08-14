@@ -1,5 +1,7 @@
 from trustgraph.retrieve import (
     abstain_message,
+    abstain_uncovered_message,
+    answer,
     build_chain_answer,
     build_conflict_answer,
     build_fast_answer,
@@ -62,3 +64,87 @@ def test_abstain_message_names_what_was_searched():
     assert "budget" in text and "product launch" in text
     assert "not in the history" in text
     assert "searched" in abstain_message("coffee machine", None)
+
+
+def test_abstain_uncovered_lists_tracked_predicates():
+    text = abstain_uncovered_message("payments integration", ["owned_by", "status"])
+    assert "owned_by, status" in text
+    assert "not in the history" in text
+    assert "payments integration" in text
+
+
+def test_abstain_uncovered_falls_back_without_claims():
+    assert abstain_uncovered_message("coffee machine", []) == abstain_message(
+        "coffee machine", None)
+
+
+class _FakeDB:
+    """Serves canned rows for the query shapes answer()/probe() emit."""
+
+    def __init__(self, entities, claims, sup_edges=(), con_edges=()):
+        self._entities = entities          # {"name", "aliases"}
+        self._claims = claims              # full fetch_claims row shape
+        self._sup = sup_edges              # (new_id, old_id)
+        self._con = con_edges              # (a_id, b_id, resolved)
+
+    def query(self, cypher, consistency="causal"):
+        if "MATCH (e:Entity)" in cypher:
+            return list(self._entities)
+        if "SUPERSEDES*1..5" in cypher:
+            return []
+        if "MATCH (a:Claim)-[:SUPERSEDES]->(b:Claim)" in cypher:
+            return [{"new_id": a, "old_id": b} for a, b in self._sup]
+        if "MATCH (a:Claim)-[r:CONTRADICTS]->(b:Claim)" in cypher:
+            return [{"a_id": a, "b_id": b, "resolved": r}
+                    for a, b, r in self._con]
+        if "c.key AS key" in cypher:        # fetch_claims (superset of probe cols)
+            return self._filter(cypher)
+        if "c.status AS status" in cypher:  # probe
+            return [{"id": c["id"], "status": c["status"], "value": c["value"]}
+                    for c in self._filter(cypher)]
+        raise AssertionError(f"unexpected query: {cypher[:120]}")
+
+    def _filter(self, cypher):
+        rows = list(self._claims)
+        if "c.status = 'active'" in cypher:
+            rows = [c for c in rows if c["status"] == "active"]
+        return rows
+
+
+def _claim(key, value, valid_from, status="active", valid_to="",
+           predicate="deadline", subject="product launch"):
+    return {
+        "id": abs(hash(key)) % (2**62), "key": key, "subject": subject,
+        "predicate": predicate, "value": value,
+        "valid_from": valid_from, "valid_to": valid_to, "status": status,
+        "confidence": 0.9, "quote": f"quote for {key}", "explicitness": 1.0,
+        "extraction_confidence": 0.9, "source_kind": "meeting",
+        "author": "Meeting notes",
+    }
+
+
+def test_origin_question_answers_with_earliest_claim():
+    claims = [
+        _claim("dl-3", "2026-10-17", "2026-05-18"),
+        _claim("dl-2", "2026-10-10", "2026-05-10", status="superseded",
+               valid_to="2026-05-18"),
+        _claim("dl-1", "2026-10-03", "2026-05-05", status="superseded",
+               valid_to="2026-05-10"),
+    ]
+    db = _FakeDB([{"name": "product launch", "aliases": "launch"}], claims)
+    result = answer(db, "When was the launch deadline first set?")
+    assert "2026-10-03" in result["answer"]
+    assert "2026-05-05" in result["answer"]
+    assert "2026-10-17" not in result["answer"]
+
+
+def test_unmapped_predicate_abstains_and_names_tracked_predicates():
+    claims = [
+        _claim("pay-own-2", "Dario Kim", "2026-05-14",
+               predicate="owned_by", subject="payments integration"),
+    ]
+    db = _FakeDB([{"name": "payments integration", "aliases": "payments"}], claims)
+    result = answer(db, "What is the payments integration's uptime SLA?")
+    assert result["route"] == "ABSTAIN"
+    assert "owned_by" in result["answer"]
+    assert "Dario Kim" not in result["answer"]

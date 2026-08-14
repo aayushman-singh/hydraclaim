@@ -47,7 +47,10 @@ Rules:
 - Only extract claims whose predicate is one of: {", ".join(sorted(PREDICATES))}.
 - subject: use the canonical entity name from KNOWN ENTITIES (aliases are provided).
   If a clearly named entity is missing from the roster, you may use its name as-is.
-- value: the object of the claim, short and factual. Dates as YYYY-MM-DD.
+- value: the object of the claim, short and factual. Dates MUST be YYYY-MM-DD:
+  convert natural-language dates using the message timestamp (a message dated
+  2026-05-18 saying "October 17" becomes 2026-10-17). Never copy a natural
+  date like "October 17" into value verbatim.
 - quote: an exact substring copied verbatim from ONE message. msg_id: that message's id.
 - author: the author of that message. source_kind: one of {", ".join(sorted(SOURCE_KINDS))} (copy from the message).
 - session_id: copy the session id shown below.

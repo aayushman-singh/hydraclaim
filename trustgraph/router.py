@@ -7,10 +7,11 @@ abstention are deliberately NOT inferred from wording; they come from the
 probe (stage 2), because question phrasing is a weak predictor of graph state.
 
 Stage 2 (decide_route), per PLAN.md:
-    coverage == 0                                              -> ABSTAIN
+    predicate is None (question maps to no tracked fact)   -> ABSTAIN
+    coverage == 0                                          -> ABSTAIN
     conflicts == 0 AND distinct values <= 1 AND depth <= 1
-      AND type == lookup                                       -> FAST
-    otherwise                                                  -> DEEP
+      AND type == lookup                                   -> FAST
+    otherwise                                              -> DEEP
 """
 
 from __future__ import annotations
@@ -136,6 +137,10 @@ def classify(
 
 
 def decide_route(question_type: str, probe: ProbeResult) -> str:
+    if probe.predicate is None:
+        # The question maps to no tracked predicate; coverage counts claims
+        # about *other* facts, so any answer would be off-topic guesswork.
+        return ROUTE_ABSTAIN
     if probe.coverage == 0:
         return ROUTE_ABSTAIN
     has_conflict = probe.conflicts > 0 or probe.distinct_active_values > 1

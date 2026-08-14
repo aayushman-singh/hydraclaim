@@ -21,8 +21,14 @@ fi
 bash scripts/dev-up.sh
 
 banner "3. Reset graph for a clean demo run"
-# Demo-only: wipe the local graph so the demo is repeatable.
-python -c 'from trustgraph.config import connect; db=connect(); db.query("MATCH (n) DETACH DELETE n"); db.close()'
+# Demo-only: wipe the local graph so the demo is repeatable. Bare MATCH (n)
+# is unsupported in this dialect, so delete per label.
+python -c '
+from trustgraph.config import connect
+db = connect()
+for label in ("Claim", "Evidence", "Source", "Entity"):
+    db.query(f"MATCH (n:{label}) DETACH DELETE n")
+db.close()'
 
 banner "4. Ingest oracle ground-truth claims"
 python -m trustgraph.ingest \
@@ -42,8 +48,8 @@ python -m trustgraph.ask "Who owns the payments integration?" --verbose
 header "Knowledge update: What is the current launch deadline?"
 python -m trustgraph.ask "What is the current launch deadline?" --verbose
 
-header "Temporal: What was the launch deadline last week?"
-python -m trustgraph.ask "What was the launch deadline last week?" --verbose
+header "Temporal: What was the launch deadline before the most recent change?"
+python -m trustgraph.ask "What was the launch deadline before the most recent change?" --verbose
 
 header "Abstention: What is the payments integration's uptime SLA?"
 python -m trustgraph.ask "What is the payments integration's uptime SLA?" --verbose

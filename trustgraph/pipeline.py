@@ -21,10 +21,12 @@ from trustgraph.reconcile import apply_plan, plan_writes
 
 
 def fetch_active_claims(db: HydraDB) -> list[dict]:
+    # Select the string `key` (not the integer graph id) so plan_writes mixes
+    # cleanly with string draft ids; graph_id(key) reproduces the node id.
     rows = db.query("""
 MATCH (c:Claim {status: 'active'})-[:ABOUT]->(e:Entity)
 OPTIONAL MATCH (c)-[:SUPPORTED_BY]->(ev:Evidence)-[:FROM]->(s:Source)
-RETURN c.id AS id, e.name AS subject, c.predicate AS predicate,
+RETURN c.key AS id, e.name AS subject, c.predicate AS predicate,
        c.value AS value, c.valid_from AS valid_from,
        s.kind AS source_kind, s.author AS author""")
     for row in rows:
@@ -46,7 +48,7 @@ def run_pipeline(db: HydraDB, doc: dict) -> dict:
                            id_prefix=f"{scen}:{session['session_id']}")
         for warning in plan["warnings"]:
             print(f"warn [{session['session_id']}]: {warning}", file=sys.stderr)
-        applied = apply_plan(db, plan, scen)
+        applied = apply_plan(db, plan, scen, doc["entities"])
         stats["sessions"].append({
             "session": session["session_id"],
             "drafts": len(drafts),

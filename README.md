@@ -33,6 +33,9 @@ With an LLM endpoint configured (`LLM_API_KEY`, optionally `LLM_BASE_URL`
 and `LLM_MODEL` — defaults are Moonshot/Kimi), the extraction pipeline:
 
 ```bash
+# Local llama.cpp example (start `llama-server` on an OpenAI-compatible port)
+# LLM_BASE_URL=http://127.0.0.1:8311/v1 LLM_API_KEY=sk-local LLM_MODEL=qwen3-8b
+
 # Extract claims offline (no HydraDB needed) and score them against ground truth
 python -m trustgraph.extract data/sessions/deadline_drift.json --emit drafts.json
 python -m trustgraph.evaluate data/sessions/deadline_drift.json drafts.json
@@ -109,14 +112,26 @@ MIT — see [LICENSE](LICENSE).
 
 ## Results
 
-Placeholder for the D4 benchmark numbers. Run the harness described in
-`docs/tasks/T1-benchmark-harness.md` to fill these cells.
+Synthetic conflict suite, 7 questions across 2 scenarios (oracle ground-truth
+ingestion). Run the harness described in `docs/tasks/T1-benchmark-harness.md`:
+
+```bash
+python -m trustgraph.benchmark data/sessions/*.json --arm all
+```
 
 | Arm | Overall accuracy | Knowledge-update accuracy | Abstention P/R | Mean queries/question | p95 latency |
 |---|---|---|---|---|---|
-| Always Deep | TBD (run T1) | TBD (run T1) | TBD (run T1) | TBD (run T1) | TBD (run T1) |
-| Question Router | TBD (run T1) | TBD (run T1) | TBD (run T1) | TBD (run T1) | TBD (run T1) |
-| Router + Graph Probe | TBD (run T1) | TBD (run T1) | TBD (run T1) | TBD (run T1) | TBD (run T1) |
+| Always Deep | 0.857 | 1.000 | 1.000 / 0.500 | 4.9 | 29.6 ms |
+| Question Router | 0.714 | 1.000 | 1.000 / 0.500 | 4.9 | 29.7 ms |
+| Router + Graph Probe | 1.000 | 1.000 | 1.000 / 1.000 | 4.7 | 35.8 ms |
+
+The router-only baseline cannot see conflicts (the payments-integration owner
+conflict is answered with only one side), and it answers an out-of-vocabulary
+"uptime SLA" question with a guess. The graph probe abstains on both cases.
+Always Deep resolves the conflict but also wastes an answer on the SLA guess,
+so its overall accuracy sits between the two. End-to-end extraction from a
+local qwen3:8b via llama.cpp scores P=1.000 / R=0.750 / F1=0.857 on the
+deadline-drift scenario (see `python -m trustgraph.evaluate`).
 
 ## Recording the demo video
 

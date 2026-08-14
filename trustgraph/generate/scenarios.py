@@ -142,6 +142,7 @@ def deadline_drift() -> dict:
              "gold_claim_keys": ["dl-2"]},
             {"question": "When was the launch deadline first set?",
              "answer": "2026-05-05, in the launch planning meeting (session s1)",
+             "rubric": ["2026-05-05", "meeting"],
              "qtype": "lookup",
              "gold_claim_keys": ["dl-1"]},
             {"question": "What budget was approved for launch marketing?",
