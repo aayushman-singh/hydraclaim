@@ -121,15 +121,22 @@ python -m trustgraph.benchmark data/sessions/*.json --arm all
 
 | Arm | Overall accuracy | Knowledge-update accuracy | Abstention P/R | Mean queries/question | p95 latency |
 |---|---|---|---|---|---|
-| Always Deep | 0.800 | 1.000 | 0.800 / 0.500 | 4.7 | 61.7 ms |
-| Question Router | 0.720 | 1.000 | 0.800 / 0.500 | 4.5 | 60.8 ms |
-| Router + Graph Probe | 0.960 | 1.000 | 0.889 / 1.000 | 4.4 | 61.4 ms |
+| Naïve RAG (top word-overlap claim) | 0.240 | 1.000 | 0.000 / 0.000 | 0.9 | 5.1 ms |
+| Question Router | 0.720 | 1.000 | 0.800 / 0.500 | 4.5 | 64.9 ms |
+| Always Deep | 0.800 | 1.000 | 0.800 / 0.500 | 4.7 | 63.4 ms |
+| Router + Graph Probe | **0.960** | 1.000 | **0.889 / 1.000** | 4.4 | 65.2 ms |
 
-The router-only baseline cannot see conflicts (the payments-integration owner
-conflict is answered with only one side), and it answers an out-of-vocabulary
-"uptime SLA" question with a guess. The graph probe abstains on both cases.
-Always Deep resolves the conflict but also wastes an answer on the SLA guess,
-so its overall accuracy sits between the two.
+The naïve RAG baseline picks the single active claim with the most word overlap
+with the question. It cannot see supersession chains, cannot surface conflicts,
+and guesses on every abstention question — dropping to 24% accuracy. The graph
+probe gives TrustGraph precise, typed coverage: it abstains when no claim backs
+the question, escalates to deep retrieval when conflicts or overwrites exist,
+and answers cheaply only when the graph is clean.
+
+**Why HydraDB?** The typed edges (`SUPERSEDES`, `CONTRADICTS`, `ABOUT`) and
+property bitemporal filters are the reason the probe is cheap and exact. A
+flat chunk store would have to re-derive chronology, conflict, and coverage at
+query time; here they are materialized graph structure.
 
 **LongMemEval**: we piloted the oracle subset; TrustGraph's closed predicate
 vocabulary is tuned for structured project-memory claims and does not cleanly

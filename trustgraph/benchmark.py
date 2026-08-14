@@ -1,6 +1,6 @@
 """Benchmark harness for the TrustGraph routing story.
 
-Runs three ablation arms over scenario ground-truth QA and reports accuracy,
+Runs four ablation arms over scenario ground-truth QA and reports accuracy,
 abstention quality, latency, and retrieval cost per question.
 
     python -m trustgraph.benchmark data/sessions/*.json --arm all
@@ -23,6 +23,62 @@ from trustgraph.retrieve import answer, fetch_entities
 from trustgraph.router import ROUTE_DEEP, ROUTE_FAST, classify
 
 REFUSAL_PHRASE = "don't have any recorded information"
+ROUTE_NAIVE_RAG = "NAIVE_RAG"
+
+
+def _tokenize(text: str) -> set[str]:
+    return set(_normalize(text).split())
+
+
+def naive_answer(db: CountingDB, question: str, roster: list[dict]) -> dict:
+    """Flat-RAG baseline: score claims by token overlap with the question.
+
+    Does not use SUPERSEDES/CONTRADICTS edges or predicate coverage — it just
+    returns the most word-overlapping active claim. This is the 're-derive
+    everything from retrieved chunks' story that TrustGraph avoids.
+    """
+    cls = classify(question, roster)
+    if cls.subject is None:
+        return {
+            "route": ROUTE_NAIVE_RAG,
+            "answer": (f"I don't have any recorded information about '{question}'. "
+                       f"No subject matched the entity roster."),
+            "citations": [],
+        }
+
+    from trustgraph.cypher import to_cypher_literal as lit
+    rows = db.query(
+        f"MATCH (c:Claim)-[:ABOUT]->(e:Entity {{name: {lit(cls.subject)}}}) "
+        "RETURN c.predicate AS predicate, c.value AS value, c.status AS status, "
+        "       c.valid_from AS valid_from"
+    )
+    active = [r for r in rows if r.get("status") == "active"]
+    if not active:
+        return {
+            "route": ROUTE_NAIVE_RAG,
+            "answer": (f"I don't have any recorded information about the "
+                       f"{cls.predicate or 'facts'} of '{cls.subject}'. "
+                       f"No active claims found."),
+            "citations": [],
+        }
+
+    q_tokens = _tokenize(question)
+    if cls.predicate:
+        q_tokens.add(cls.predicate)
+
+    def score(row: dict) -> float:
+        text = f"{row.get('predicate', '')} {row.get('value', '')}"
+        tokens = _tokenize(text)
+        if not tokens:
+            return 0.0
+        return len(tokens & q_tokens) / len(tokens)
+
+    best = max(active, key=score)
+    return {
+        "route": ROUTE_NAIVE_RAG,
+        "answer": f"{cls.subject} — {best['predicate']}: {best['value']}.",
+        "citations": [],
+    }
 
 
 def _normalize(text: str) -> str:
@@ -124,7 +180,7 @@ def run_arm(
     questions = 0
 
     roster: list[dict] = []
-    if arm == "router-only":
+    if arm in ("router-only", "naive-rag"):
         roster = fetch_entities(db)
 
     for scenario in scenarios:
@@ -145,6 +201,8 @@ def run_arm(
                 )
             elif arm == "always-deep":
                 result = answer(db, question, force_route=ROUTE_DEEP)
+            elif arm == "naive-rag":
+                result = naive_answer(db, question, roster)
             else:
                 raise ValueError(f"unknown arm: {arm}")
 
@@ -248,7 +306,7 @@ def main() -> None:
     parser.add_argument("scenarios", nargs="+", help="scenario JSON files or globs")
     parser.add_argument(
         "--arm",
-        choices=["router+probe", "router-only", "always-deep", "all"],
+        choices=["router+probe", "router-only", "always-deep", "naive-rag", "all"],
         default="all",
         help="benchmark arm to run",
     )
@@ -258,7 +316,7 @@ def main() -> None:
     scenarios = [json.loads(p.read_text(encoding="utf-8")) for p in scenario_paths]
 
     arms = (
-        ["router+probe", "router-only", "always-deep"]
+        ["router+probe", "router-only", "always-deep", "naive-rag"]
         if args.arm == "all"
         else [args.arm]
     )
