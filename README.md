@@ -136,7 +136,10 @@ vocabulary is tuned for structured project-memory claims and does not cleanly
 extract open-ended personal-dialogue facts with the local 8B model. We therefore
 report the scaled synthetic suite above as the primary ablation, which exercises
 the same five LongMemEval abilities (IE, multi-session, temporal, knowledge
-update, abstention) in the system's intended domain.
+update, abstention) in the system's intended domain. To try the converter on the
+real data, download `longmemeval_oracle.json` from the
+[LongMemEval HuggingFace dataset](https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned)
+and run `python -m trustgraph.longmemeval convert <file> --out data/longmemeval/scenarios`.
 
 End-to-end extraction from a local qwen3:8b via llama.cpp scores
 P=1.000 / R=0.750 / F1=0.857 on the deadline-drift scenario (see

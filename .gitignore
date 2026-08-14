@@ -3,6 +3,7 @@ hydradb-data/
 
 # Generated benchmark data
 data/sessions/
+data/longmemeval/
 results/
 
 # Python
