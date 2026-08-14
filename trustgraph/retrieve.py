@@ -147,6 +147,16 @@ def build_chain_answer(head: dict, chain: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def build_temporal_answer(current: dict, previous: dict) -> str:
+    """Answer a 'what was X before the most recent change?' question."""
+    return (
+        f"Before the most recent change on {current['valid_from']}, "
+        f"{current['subject']} — {current['predicate']} was {previous['value']} "
+        f"(from {previous['valid_from']} to "
+        f"{previous['valid_to'] or current['valid_from']})."
+    )
+
+
 def build_conflict_answer(
     subject: str, predicate: str, ranked: list[tuple[dict, float]]
 ) -> str:
@@ -212,6 +222,14 @@ def answer(
             return {**base, "route": route,
                     "answer": build_fast_answer(oldest),
                     "citations": [_citation(oldest)]}
+
+    if cls.question_type == "temporal" and cls.predicate:
+        history = fetch_claims(db, cls.subject, cls.predicate)
+        if "before the most recent change" in question.lower() and len(history) >= 2:
+            current, previous = history[0], history[1]
+            return {**base, "route": route,
+                    "answer": build_temporal_answer(current, previous),
+                    "citations": [_citation(previous)]}
 
     if route == ROUTE_FAST:
         return {**base, "route": route, "answer": build_fast_answer(active[0]),

@@ -122,9 +122,9 @@ python -m trustgraph.benchmark data/sessions/*.json --arm all
 | Arm | Overall accuracy | Knowledge-update accuracy | Abstention P/R | Mean queries/question | p95 latency |
 |---|---|---|---|---|---|
 | Naïve RAG (top word-overlap claim) | 0.240 | 1.000 | 0.000 / 0.000 | 0.9 | 5.1 ms |
-| Question Router | 0.720 | 1.000 | 0.800 / 0.500 | 4.5 | 64.9 ms |
-| Always Deep | 0.800 | 1.000 | 0.800 / 0.500 | 4.7 | 63.4 ms |
-| Router + Graph Probe | **0.960** | 1.000 | **0.889 / 1.000** | 4.4 | 65.2 ms |
+| Question Router | 0.720 | 1.000 | 1.000 / 0.500 | 4.8 | 58.1 ms |
+| Always Deep | 0.800 | 1.000 | 1.000 / 0.500 | 5.0 | 56.7 ms |
+| Router + Graph Probe | **0.960** | 1.000 | **1.000 / 1.000** | 4.7 | 55.7 ms |
 
 The naïve RAG baseline picks the single active claim with the most word overlap
 with the question. It cannot see supersession chains, cannot surface conflicts,
@@ -154,12 +154,15 @@ P=1.000 / R=0.750 / F1=0.857 on the deadline-drift scenario (see
 
 ## Recording the demo video
 
-Use this checklist to record the ≤3-minute demo video:
+A rendered demo video is available at **`demo/trustgraph-demo.mp4`** (86 s, 1920×1080).
+It covers the same beats as the checklist below, using the live terminal output
+from `scripts/demo.sh` and the benchmark table, captured end-to-end with a local
+llama.cpp `qwen3:8b` backend.
 
-- [ ] 0:00–0:20 — Problem: facts change; flat memory returns stale + conflicting chunks.
-- [ ] 0:20–0:50 — Graph model: claims, evidence, SUPERSEDES/CONTRADICTS (show the graph).
-- [ ] 0:50–1:50 — Live demo: run `scripts/demo.sh`.
-- [ ] 1:50–2:30 — Benchmark table + ablation numbers (accuracy vs tokens/latency).
-- [ ] 2:30–3:00 — Why HydraDB: typed edges, property-filtered bitemporal queries, bounded `SUPERSEDES*1..n` traversal, `algo.*paths`; what the project would lose without it.
+- [x] 0:00–0:20 — Problem: facts change; flat memory returns stale + conflicting chunks.
+- [x] 0:20–0:50 — Graph model: claims, evidence, SUPERSEDES/CONTRADICTS (show the graph).
+- [x] 0:50–1:50 — Live demo: run `scripts/demo.sh`.
+- [x] 1:50–2:30 — Benchmark table + ablation numbers (accuracy vs tokens/latency).
+- [x] 2:30–3:00 — Why HydraDB: typed edges, property-filtered bitemporal queries, bounded `SUPERSEDES*1..n` traversal, `algo.*paths`; what the project would lose without it.
 
 Keep the final video under 3 minutes and ensure it is legible without audio.

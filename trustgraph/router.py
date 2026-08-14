@@ -37,11 +37,11 @@ _PREDICATE_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     ("owned_by", ("own", "owner", "who owns")),
     ("assigned_to", ("assign", "on the team", "which team", "joining the", "moved to the")),
     ("deadline", ("deadline", "due date", "due")),
-    ("status", ("status", "at risk", "on track", "blocked", "blocker", "complete",
-                "delayed", "green", "red")),
+    ("status", ("status", "at risk", "on track", "blocked", "blocker", "blocking",
+                "complete", "delayed", "green", "red")),
     ("decided", ("decid", "approved")),
     ("depends_on", ("depend", "blocked by", "waiting on")),
-    ("blocks", ("blocks", "blocking")),
+    ("blocks", ("blocks",)),
     ("reports_to", ("reports to", "manager")),
     ("works_on", ("working on", "works on")),
     ("located_in", ("located", "based in", "based", "where is", "where was", "where does")),
@@ -50,7 +50,8 @@ _PREDICATE_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
 ]
 
 _TEMPORAL_MARKERS = ("before", "previously", "used to", "originally",
-                     "at the start", "earlier", "last week", "last month")
+                     "at the start", "earlier", "last week", "last month",
+                     "was blocking", "blocking the")
 _UPDATE_MARKERS = ("current", "currently", "now", "latest", "today")
 
 

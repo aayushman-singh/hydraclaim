@@ -1,3 +1,5 @@
+import re
+
 from trustgraph.retrieve import (
     abstain_message,
     abstain_uncovered_message,
@@ -5,6 +7,7 @@ from trustgraph.retrieve import (
     build_chain_answer,
     build_conflict_answer,
     build_fast_answer,
+    build_temporal_answer,
 )
 
 CLAIM = {
@@ -39,6 +42,49 @@ def test_chain_answer_lists_history_oldest_behind_current():
     assert "current, since 2026-05-18" in text
     assert "2026-10-10 (2026-05-10 -> 2026-05-18)" in text
     assert "2026-10-03" in text
+
+
+def test_temporal_answer_returns_previous_value():
+    current = {**CLAIM, "valid_from": "2026-05-18"}
+    previous = {
+        "id": "dl-2", "subject": "product launch", "predicate": "deadline",
+        "value": "2026-10-10", "valid_from": "2026-05-10",
+        "valid_to": "2026-05-18", "source_kind": "meeting",
+        "author": "Meeting notes", "quote": "deadline moved to Oct 10",
+    }
+    text = build_temporal_answer(current, previous)
+    assert "Before the most recent change on 2026-05-18" in text
+    assert "was 2026-10-10" in text
+    assert "from 2026-05-10 to 2026-05-18" in text
+
+
+def test_temporal_question_uses_previous_claim():
+    claims = [
+        _claim("dl-3", "2026-10-17", "2026-05-18"),
+        _claim("dl-2", "2026-10-10", "2026-05-10", status="superseded",
+               valid_to="2026-05-18"),
+        _claim("dl-1", "2026-10-03", "2026-05-05", status="superseded",
+               valid_to="2026-05-10"),
+    ]
+    db = _FakeDB([{"name": "product launch", "aliases": "launch"}], claims)
+    result = answer(db, "What was the launch deadline before the most recent change?")
+    assert "was 2026-10-10" in result["answer"]
+    assert "2026-10-17" not in result["answer"]
+
+
+def test_temporal_fallback_uses_chain_answer():
+    claims = [
+        _claim("dl-3", "2026-10-17", "2026-05-18"),
+        _claim("dl-2", "2026-10-10", "2026-05-10", status="superseded",
+               valid_to="2026-05-18"),
+    ]
+    db = _FakeDB(
+        [{"name": "product launch", "aliases": "launch"}], claims,
+        sup_edges=((claims[0]["id"], claims[1]["id"]),)
+    )
+    result = answer(db, "What was the launch deadline before the cut?")
+    assert "current, since 2026-05-18" in result["answer"]
+    assert "2026-10-10" in result["answer"]
 
 
 def test_conflict_answer_shows_all_sides_and_winner():
@@ -91,7 +137,24 @@ class _FakeDB:
         if "MATCH (e:Entity)" in cypher:
             return list(self._entities)
         if "SUPERSEDES*1..5" in cypher:
-            return []
+            m = re.search(r"id:\s*(\d+)", cypher)
+            start = int(m.group(1)) if m else None
+            ancestors = set()
+            stack = [start]
+            out = []
+            while stack:
+                cur = stack.pop()
+                for new_id, old_id in self._sup:
+                    if new_id == cur and old_id not in ancestors:
+                        ancestors.add(old_id)
+                        stack.append(old_id)
+                        row = next(c for c in self._claims if c["id"] == old_id)
+                        out.append({
+                            "id": old_id, "value": row["value"],
+                            "valid_from": row["valid_from"],
+                            "valid_to": row["valid_to"],
+                        })
+            return out
         if "MATCH (a:Claim)-[:SUPERSEDES]->(b:Claim)" in cypher:
             return [{"new_id": a, "old_id": b} for a, b in self._sup]
         if "MATCH (a:Claim)-[r:CONTRADICTS]->(b:Claim)" in cypher:
