@@ -153,4 +153,265 @@ def deadline_drift() -> dict:
     }
 
 
-SCENARIOS = [payments_owner_conflict, deadline_drift]
+def feature_owner_handoff() -> dict:
+    """Clean handoff in Slack; Linear ticket updated to match."""
+    return {
+        "scenario_id": "feature_owner_handoff",
+        "description": "API gateway ownership moves from Alex to Jordan; both sources agree.",
+        "entities": [
+            {"name": "api gateway", "type": "system",
+             "aliases": ["gateway", "api proxy"]},
+            {"name": "Alex Rivera", "type": "person", "aliases": ["Alex", "@alex"]},
+            {"name": "Jordan Lee", "type": "person", "aliases": ["Jordan", "@jordan"]},
+        ],
+        "events": [
+            _ev(0, "s1", "meeting", "Meeting notes", "fireflies",
+                "Alex Rivera will own the api gateway redesign for Q3.",
+                [_claim("gw-own-1", "api gateway", "owned_by", "Alex Rivera", 0,
+                        "Alex Rivera will own the api gateway redesign", "Meeting notes", "meeting")]),
+            _ev(5, "s2", "slack", "Jordan Lee", "#platform",
+                "Taking over the api gateway redesign from Alex — starting the auth refactor today.",
+                [_claim("gw-own-2", "api gateway", "owned_by", "Jordan Lee", 5,
+                        "Taking over the api gateway redesign from Alex", "Jordan Lee", "slack",
+                        supersedes="gw-own-1")]),
+            _ev(6, "s3", "linear", "Linear", "linear",
+                "API-44 owner updated to Jordan Lee.",
+                [_claim("gw-own-3", "api gateway", "owned_by", "Jordan Lee", 6,
+                        "owner updated to Jordan Lee", "Linear", "linear")]),
+        ],
+        "qa": [
+            {"question": "Who owns the api gateway redesign?",
+             "answer": "Jordan Lee",
+             "qtype": "knowledge_update",
+             "gold_claim_keys": ["gw-own-2", "gw-own-3"]},
+            {"question": "Who originally owned the api gateway redesign?",
+             "answer": "Alex Rivera",
+             "qtype": "temporal",
+             "gold_claim_keys": ["gw-own-1"]},
+            {"question": "What is the api gateway's uptime target?",
+             "answer": "ABSTAIN",
+             "qtype": "abstention",
+             "gold_claim_keys": []},
+        ],
+    }
+
+
+def status_escalation() -> dict:
+    """Project status moves from on track to at risk to blocked."""
+    return {
+        "scenario_id": "status_escalation",
+        "description": "Mobile app launch status degrades across three check-ins.",
+        "entities": [
+            {"name": "mobile app launch", "type": "project",
+             "aliases": ["mobile launch", "app launch"]},
+            {"name": "Sam Taylor", "type": "person", "aliases": ["Sam", "@sam"]},
+        ],
+        "events": [
+            _ev(1, "s1", "meeting", "Meeting notes", "fireflies",
+                "Mobile app launch is on track for the end of the month.",
+                [_claim("mob-status-1", "mobile app launch", "status", "on track", 1,
+                        "Mobile app launch is on track", "Meeting notes", "meeting")]),
+            _ev(8, "s2", "slack", "Sam Taylor", "#mobile",
+                "Heads up: mobile app launch is now at risk because the review cycle is taking longer than expected.",
+                [_claim("mob-status-2", "mobile app launch", "status", "at risk", 8,
+                        "mobile app launch is now at risk", "Sam Taylor", "slack",
+                        supersedes="mob-status-1")]),
+            _ev(13, "s3", "linear", "Linear", "linear",
+                "MOBILE-12 status changed to Blocked — waiting on App Store review.",
+                [_claim("mob-status-3", "mobile app launch", "status", "blocked", 13,
+                        "status changed to Blocked", "Linear", "linear",
+                        supersedes="mob-status-2")]),
+        ],
+        "qa": [
+            {"question": "What is the current status of the mobile app launch?",
+             "answer": "blocked",
+             "qtype": "knowledge_update",
+             "gold_claim_keys": ["mob-status-3"]},
+            {"question": "When did the mobile app launch become at risk?",
+             "answer": "2026-05-12",
+             "qtype": "lookup",
+             "gold_claim_keys": ["mob-status-2"]},
+            {"question": "Who is blocked by the App Store review?",
+             "answer": "ABSTAIN",
+             "qtype": "abstention",
+             "gold_claim_keys": []},
+        ],
+    }
+
+
+def budget_decision_conflict() -> dict:
+    """Approved budget later challenged; finance record differs from project lead."""
+    return {
+        "scenario_id": "budget_decision_conflict",
+        "description": "Marketing budget approved, then cut in Slack; finance system still shows the approved amount.",
+        "entities": [
+            {"name": "Q3 marketing budget", "type": "project",
+             "aliases": ["marketing budget", "q3 budget"]},
+            {"name": "Riley Chen", "type": "person", "aliases": ["Riley", "@riley"]},
+            {"name": "Finance Bot", "type": "system", "aliases": ["finance"]},
+        ],
+        "events": [
+            _ev(2, "s1", "meeting", "Meeting notes", "fireflies",
+                "Q3 marketing budget approved at $120k.",
+                [_claim("bud-1", "Q3 marketing budget", "budget", "$120,000", 2,
+                        "Q3 marketing budget approved at $120k", "Meeting notes", "meeting")]),
+            _ev(9, "s2", "slack", "Riley Chen", "#marketing",
+                "Correction: we need to cut the Q3 marketing budget to $80k effective immediately.",
+                [_claim("bud-2", "Q3 marketing budget", "budget", "$80,000", 9,
+                        "cut the Q3 marketing budget to $80k", "Riley Chen", "slack",
+                        supersedes="bud-1")]),
+            _ev(11, "s3", "linear", "Finance Bot", "finance",
+                "Budget request BUD-77 approved: Q3 marketing budget $120,000.",
+                [_claim("bud-3", "Q3 marketing budget", "budget", "$120,000", 11,
+                        "Q3 marketing budget $120,000", "Finance Bot", "linear",
+                        contradicts_with=["bud-2"])]),
+        ],
+        "qa": [
+            {"question": "What is the current Q3 marketing budget?",
+             "answer": ("Unresolved conflict: Riley Chen cut the budget to $80,000 on 2026-05-13, "
+                        "but Finance Bot still shows the approved $120,000 on 2026-05-15."),
+             "rubric": ["conflict", "$80,000", "$120,000"],
+             "qtype": "conflict",
+             "gold_claim_keys": ["bud-2", "bud-3"]},
+            {"question": "What was the Q3 marketing budget before the cut?",
+             "answer": "$120,000",
+             "qtype": "temporal",
+             "gold_claim_keys": ["bud-1"]},
+            {"question": "Which vendor was selected for the Q3 marketing campaign?",
+             "answer": "ABSTAIN",
+             "qtype": "abstention",
+             "gold_claim_keys": []},
+        ],
+    }
+
+
+def team_assignment_change() -> dict:
+    """Person moved from one team to another."""
+    return {
+        "scenario_id": "team_assignment_change",
+        "description": "Morgan moves from Growth to Platform; org chart updated late.",
+        "entities": [
+            {"name": "Morgan Patel", "type": "person", "aliases": ["Morgan", "@morgan"]},
+            {"name": "Growth team", "type": "team", "aliases": ["Growth"]},
+            {"name": "Platform team", "type": "team", "aliases": ["Platform"]},
+        ],
+        "events": [
+            _ev(0, "s1", "meeting", "Meeting notes", "fireflies",
+                "Morgan Patel is joining the Growth team next quarter.",
+                [_claim("team-1", "Morgan Patel", "assigned_to", "Growth team", 0,
+                        "Morgan Patel is joining the Growth team", "Meeting notes", "meeting")]),
+            _ev(7, "s2", "slack", "Morgan Patel", "#general",
+                "Switching to the Platform team this week — excited to work on infra.",
+                [_claim("team-2", "Morgan Patel", "assigned_to", "Platform team", 7,
+                        "Switching to the Platform team", "Morgan Patel", "slack",
+                        supersedes="team-1")]),
+            _ev(12, "s3", "linear", "Linear", "linear",
+                "ORG-9 team assignment updated: Morgan Patel -> Platform team.",
+                [_claim("team-3", "Morgan Patel", "assigned_to", "Platform team", 12,
+                        "Morgan Patel -> Platform team", "Linear", "linear")]),
+        ],
+        "qa": [
+            {"question": "Which team is Morgan Patel on now?",
+             "answer": "Platform team",
+             "qtype": "knowledge_update",
+             "gold_claim_keys": ["team-2", "team-3"]},
+            {"question": "Which team was Morgan Patel originally joining?",
+             "answer": "Growth team",
+             "qtype": "temporal",
+             "gold_claim_keys": ["team-1"]},
+            {"question": "What is Morgan Patel's salary band?",
+             "answer": "ABSTAIN",
+             "qtype": "abstention",
+             "gold_claim_keys": []},
+        ],
+    }
+
+
+def location_change() -> dict:
+    """Employee relocates; HR record and Slack message agree."""
+    return {
+        "scenario_id": "location_change",
+        "description": "Casey moves from San Francisco to New York.",
+        "entities": [
+            {"name": "Casey Brooks", "type": "person", "aliases": ["Casey", "@casey"]},
+        ],
+        "events": [
+            _ev(0, "s1", "meeting", "Meeting notes", "fireflies",
+                "Casey Brooks is based in San Francisco.",
+                [_claim("loc-1", "Casey Brooks", "located_in", "San Francisco", 0,
+                        "Casey Brooks is based in San Francisco", "Meeting notes", "meeting")]),
+            _ev(10, "s2", "slack", "Casey Brooks", "#general",
+                "Officially moved to New York as of this week.",
+                [_claim("loc-2", "Casey Brooks", "located_in", "New York", 10,
+                        "Officially moved to New York", "Casey Brooks", "slack",
+                        supersedes="loc-1")]),
+            _ev(11, "s3", "linear", "HR Bot", "hr",
+                "HR-88 location updated: Casey Brooks -> New York.",
+                [_claim("loc-3", "Casey Brooks", "located_in", "New York", 11,
+                        "Casey Brooks -> New York", "HR Bot", "linear")]),
+        ],
+        "qa": [
+            {"question": "Where is Casey Brooks located now?",
+             "answer": "New York",
+             "qtype": "knowledge_update",
+             "gold_claim_keys": ["loc-2", "loc-3"]},
+            {"question": "Where was Casey Brooks based originally?",
+             "answer": "San Francisco",
+             "qtype": "temporal",
+             "gold_claim_keys": ["loc-1"]},
+            {"question": "What is Casey Brooks's phone number?",
+             "answer": "ABSTAIN",
+             "qtype": "abstention",
+             "gold_claim_keys": []},
+        ],
+    }
+
+
+def dependency_unblocked() -> dict:
+    """One service blocks another, then the blocker is resolved."""
+    return {
+        "scenario_id": "dependency_unblocked",
+        "description": "Checkout rollout blocked by search outage, then unblocked.",
+        "entities": [
+            {"name": "checkout rollout", "type": "project", "aliases": ["checkout"]},
+            {"name": "search service", "type": "system", "aliases": ["search"]},
+        ],
+        "events": [
+            _ev(3, "s1", "slack", "Engineering lead", "#eng",
+                "Checkout rollout status: blocked by the search service outage.",
+                [_claim("dep-1", "checkout rollout", "status", "blocked by search service", 3,
+                        "Checkout rollout status: blocked by the search service",
+                        "Engineering lead", "slack")]),
+            _ev(8, "s2", "slack", "Engineering lead", "#eng",
+                "Search service is back online — checkout rollout is now unblocked.",
+                [_claim("dep-2", "checkout rollout", "status", "unblocked", 8,
+                        "checkout rollout is now unblocked", "Engineering lead", "slack",
+                        supersedes="dep-1")]),
+        ],
+        "qa": [
+            {"question": "What is the current status of the checkout rollout?",
+             "answer": "unblocked",
+             "qtype": "knowledge_update",
+             "gold_claim_keys": ["dep-2"]},
+            {"question": "What was blocking the checkout rollout?",
+             "answer": "search service outage",
+             "qtype": "temporal",
+             "gold_claim_keys": ["dep-1"]},
+            {"question": "Who owns the checkout rollout?",
+             "answer": "ABSTAIN",
+             "qtype": "abstention",
+             "gold_claim_keys": []},
+        ],
+    }
+
+
+SCENARIOS = [
+    payments_owner_conflict,
+    deadline_drift,
+    feature_owner_handoff,
+    status_escalation,
+    budget_decision_conflict,
+    team_assignment_change,
+    location_change,
+    dependency_unblocked,
+]

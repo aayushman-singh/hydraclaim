@@ -112,7 +112,7 @@ MIT — see [LICENSE](LICENSE).
 
 ## Results
 
-Synthetic conflict suite, 7 questions across 2 scenarios (oracle ground-truth
+Synthetic conflict suite, **25 questions across 8 scenarios** (oracle ground-truth
 ingestion). Run the harness described in `docs/tasks/T1-benchmark-harness.md`:
 
 ```bash
@@ -121,17 +121,26 @@ python -m trustgraph.benchmark data/sessions/*.json --arm all
 
 | Arm | Overall accuracy | Knowledge-update accuracy | Abstention P/R | Mean queries/question | p95 latency |
 |---|---|---|---|---|---|
-| Always Deep | 0.857 | 1.000 | 1.000 / 0.500 | 4.9 | 29.6 ms |
-| Question Router | 0.714 | 1.000 | 1.000 / 0.500 | 4.9 | 29.7 ms |
-| Router + Graph Probe | 1.000 | 1.000 | 1.000 / 1.000 | 4.7 | 35.8 ms |
+| Always Deep | 0.800 | 1.000 | 0.800 / 0.500 | 4.7 | 61.7 ms |
+| Question Router | 0.720 | 1.000 | 0.800 / 0.500 | 4.5 | 60.8 ms |
+| Router + Graph Probe | 0.960 | 1.000 | 0.889 / 1.000 | 4.4 | 61.4 ms |
 
 The router-only baseline cannot see conflicts (the payments-integration owner
 conflict is answered with only one side), and it answers an out-of-vocabulary
 "uptime SLA" question with a guess. The graph probe abstains on both cases.
 Always Deep resolves the conflict but also wastes an answer on the SLA guess,
-so its overall accuracy sits between the two. End-to-end extraction from a
-local qwen3:8b via llama.cpp scores P=1.000 / R=0.750 / F1=0.857 on the
-deadline-drift scenario (see `python -m trustgraph.evaluate`).
+so its overall accuracy sits between the two.
+
+**LongMemEval**: we piloted the oracle subset; TrustGraph's closed predicate
+vocabulary is tuned for structured project-memory claims and does not cleanly
+extract open-ended personal-dialogue facts with the local 8B model. We therefore
+report the scaled synthetic suite above as the primary ablation, which exercises
+the same five LongMemEval abilities (IE, multi-session, temporal, knowledge
+update, abstention) in the system's intended domain.
+
+End-to-end extraction from a local qwen3:8b via llama.cpp scores
+P=1.000 / R=0.750 / F1=0.857 on the deadline-drift scenario (see
+`python -m trustgraph.evaluate`).
 
 ## Recording the demo video
 

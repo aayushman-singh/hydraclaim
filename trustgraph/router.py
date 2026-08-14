@@ -34,16 +34,17 @@ QUESTION_TYPES = frozenset(
 
 # Checked in order; first hit wins. Keep specific predicates above generic ones.
 _PREDICATE_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
-    ("owned_by", ("own",)),
-    ("assigned_to", ("assign",)),
+    ("owned_by", ("own", "owner", "who owns")),
+    ("assigned_to", ("assign", "on the team", "which team", "joining the", "moved to the")),
     ("deadline", ("deadline", "due date", "due")),
-    ("status", ("status",)),
-    ("decided", ("decid",)),
-    ("depends_on", ("depend",)),
-    ("blocks", ("block",)),
+    ("status", ("status", "at risk", "on track", "blocked", "blocker", "complete",
+                "delayed", "green", "red")),
+    ("decided", ("decid", "approved")),
+    ("depends_on", ("depend", "blocked by", "waiting on")),
+    ("blocks", ("blocks", "blocking")),
     ("reports_to", ("reports to", "manager")),
     ("works_on", ("working on", "works on")),
-    ("located_in", ("located", "based in", "where is")),
+    ("located_in", ("located", "based in", "based", "where is", "where was", "where does")),
     ("prefers", ("prefer",)),
     ("budget", ("budget", "cost", "how much")),
 ]
