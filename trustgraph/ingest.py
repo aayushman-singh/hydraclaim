@@ -2,13 +2,12 @@
 
 This is the deterministic ingestion path used for development and for the
 benchmark's oracle arm: ground-truth claims go through the same graph-write
-code that the LLM extraction pipeline (D2) will feed, so switching to
-extracted claims changes only where the claim list comes from, not how it
-lands in the graph.
+code that the LLM extraction pipeline (reconcile.apply_plan) uses.
 
-Idempotent by graph id: re-ingesting a document skips nodes that already
-exist. Graph ids are namespaced as `{scenario_id}:{claim_key}` so scenarios
-never collide.
+Write-path dialect (verified live, D1): every statement is a single one-hop
+CREATE whose endpoints upsert by integer `id`. Nodes are skipped when they
+already exist, so re-ingesting a document is safe. Edges are created only
+between id-known endpoints.
 
 CLI: python -m trustgraph.ingest data/sessions/deadline_drift.json [...]
 """
@@ -17,129 +16,109 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 from datetime import datetime, timezone
 from pathlib import Path
 
 from trustgraph.cypher import to_cypher_literal as lit
 from trustgraph.db import HydraDB
+from trustgraph.model import (
+    claim_props,
+    entity_key,
+    entity_props,
+    evidence_props,
+    graph_id,
+    source_props,
+)
 
 
-def slug(name: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+def _props(props: dict) -> str:
+    return "{" + ", ".join(f"{k}: {lit(v)}" for k, v in props.items()) + "}"
 
 
-def _unwind(db: HydraDB, rows: list[dict], body: str) -> None:
-    if rows:
-        db.query(f"UNWIND {lit(rows)} AS row\n{body}")
+def node_exists(db: HydraDB, label: str, key: str) -> bool:
+    return db.node_exists(label, graph_id(key))
+
+
+def edge_exists(db: HydraDB, label_a: str, id_a: int, rel: str,
+                label_b: str, id_b: int) -> bool:
+    row = db.query_one(
+        f"MATCH (a:{label_a} {{id: {id_a}}})-[:{rel}]->(b:{label_b} {{id: {id_b}}}) "
+        "RETURN count(*) AS c"
+    )
+    return bool(row and row.get("c", 0) > 0)
+
+
+def write_claim(db: HydraDB, cid: str, claim: dict, entity_endpoint: str,
+                recorded_at: str) -> None:
+    """Create one claim + evidence + source + entity attachment (3 CREATEs)."""
+    cprops = _props(claim_props(claim, cid, recorded_at))
+    eprops = _props(evidence_props(claim, cid))
+    evid = evidence_props(claim, cid)["id"]
+    sprops = _props(source_props(claim["source_kind"], claim["author"]))
+
+    db.query(f"CREATE (c:Claim {cprops})-[:SUPPORTED_BY]->(ev:Evidence {eprops})")
+    db.query(f"CREATE (ev:Evidence {{id: {evid}}})-[:FROM]->(s:Source {sprops})")
+    db.query(f"CREATE (c:Claim {{id: {graph_id(cid)}}})-[:ABOUT]->(e:Entity {entity_endpoint})")
+
+
+def write_edge(db: HydraDB, rel: str, a_key: str, b_key: str, props: dict) -> None:
+    a_id, b_id = graph_id(a_key), graph_id(b_key)
+    if edge_exists(db, "Claim", a_id, rel, "Claim", b_id):
+        return
+    prop_str = f" {_props(props)}" if props else ""
+    db.query(f"CREATE (a:Claim {{id: {a_id}}})-[:{rel}{prop_str}]->(b:Claim {{id: {b_id}}})")
 
 
 def ingest_document(db: HydraDB, doc: dict) -> dict:
     scen = doc["scenario_id"]
     recorded_at = datetime.now(timezone.utc).isoformat()
-    stats = {"scenario": scen, "entities": 0, "claims": 0, "supersedes_edges": 0,
-             "contradicts_edges": 0, "skipped_existing": 0}
+    stats = {"scenario": scen, "claims": 0, "supersedes_edges": 0,
+             "contradicts_edges": 0, "skipped_existing": 0, "warnings": []}
 
-    # --- entities -------------------------------------------------------
-    entity_ids: dict[str, str] = {}
-    for entity in doc["entities"]:
-        eid = f"{scen}:{slug(entity['name'])}"
-        entity_ids[entity["name"]] = eid
-        if db.node_exists("Entity", eid):
-            stats["skipped_existing"] += 1
-            continue
-        db.query(
-            "CREATE (e:Entity {id: %s, name: %s, type: %s, aliases: %s})"
-            % (lit(eid), lit(entity["name"]), lit(entity["type"]), lit(entity["aliases"]))
-        )
-        stats["entities"] += 1
-
-    # --- claims + evidence (batched) ------------------------------------
     claims = doc["ground_truth"]["claims"]
-    rows = []
-    for c in claims:
-        cid = f"{scen}:{c['key']}"
-        if db.node_exists("Claim", cid):
+    claimed_subjects = {c["subject"] for c in claims}
+    for entity in doc["entities"]:
+        if entity["name"] not in claimed_subjects:
+            stats["warnings"].append(
+                f"entity {entity['name']!r} has no claims; not created "
+                "(nodes are created paired with their first claim)"
+            )
+
+    # Entities upsert with full props once; later claims attach by id only.
+    entity_endpoint: dict[str, str] = {}
+    for entity in doc["entities"]:
+        if entity["name"] in claimed_subjects:
+            entity_endpoint[entity["name"]] = _props(
+                entity_props(scen, entity["name"], entity.get("type", "unknown"),
+                             entity.get("aliases", []))
+            )
+
+    for claim in claims:
+        cid = f"{scen}:{claim['key']}"
+        if node_exists(db, "Claim", cid):
             stats["skipped_existing"] += 1
             continue
-        rows.append(
-            {
-                "cid": cid,
-                "predicate": c["predicate"],
-                "value": c["value"],
-                "valid_from": c["valid_from"],
-                "valid_to": c["valid_to"],
-                "recorded_at": recorded_at,
-                "status": c["status"],
-                "confidence": c["confidence"],
-                "evid": f"{cid}:ev0",
-                "quote": c["quote"],
-                "ts": c["valid_from"],
-                "session_id": c["session_id"],
-                "msg_id": c["msg_id"],
-                "extraction_confidence": c["confidence"],
-                "explicitness": c["explicitness"],
-                "entity_id": entity_ids[c["subject"]],
-                "source_id": f"{c['source_kind']}:{c['author']}",
-                "source_kind": c["source_kind"],
-                "source_author": c["author"],
-            }
-        )
+        subject = claim["subject"]
+        endpoint = entity_endpoint.get(subject)
+        if endpoint is None:
+            endpoint = _props(entity_props(scen, subject))
+        write_claim(db, cid, claim, endpoint, recorded_at)
+        # After first attachment, reference the entity by id only (avoids
+        # re-upserting full props on every claim).
+        entity_endpoint[subject] = f"{{id: {graph_id(entity_key(scen, subject))}}}"
+        stats["claims"] += 1
 
-    _unwind(db, rows, """
-CREATE (c:Claim {id: row.cid, predicate: row.predicate, value: row.value,
-                 valid_from: row.valid_from, valid_to: row.valid_to,
-                 recorded_at: row.recorded_at, status: row.status,
-                 confidence: row.confidence})
-CREATE (ev:Evidence {id: row.evid, quote: row.quote, ts: row.ts,
-                     session_id: row.session_id, msg_id: row.msg_id,
-                     extraction_confidence: row.extraction_confidence,
-                     explicitness: row.explicitness})
-CREATE (c)-[:SUPPORTED_BY]->(ev)""")
-
-    # Sources: one node per distinct (kind, author), then edges to evidence.
-    sources: dict[str, dict] = {}
-    for row in rows:
-        sources.setdefault(
-            row["source_id"],
-            {"id": row["source_id"], "kind": row["source_kind"], "author": row["source_author"]},
-        )
-    for src in sources.values():
-        if db.node_exists("Source", src["id"]):
-            continue
-        db.query(
-            "CREATE (s:Source {id: %s, kind: %s, author: %s})"
-            % (lit(src["id"]), lit(src["kind"]), lit(src["author"]))
-        )
-
-    _unwind(db, rows, """
-MATCH (c:Claim {id: row.cid}), (e:Entity {id: row.entity_id})
-CREATE (c)-[:ABOUT]->(e)""")
-    _unwind(db, rows, """
-MATCH (ev:Evidence {id: row.evid}), (s:Source {id: row.source_id})
-CREATE (ev)-[:FROM]->(s)""")
-    stats["claims"] = len(rows)
-
-    # --- supersession + contradiction edges ------------------------------
-    sup_rows, con_rows = [], []
-    for c in claims:
-        if c["supersedes"]:
-            sup_rows.append(
-                {"new_id": f"{scen}:{c['key']}", "old_id": f"{scen}:{c['supersedes']}",
-                 "at": c["valid_from"]}
-            )
-        for other in c["contradicts_with"]:
-            pair = sorted([f"{scen}:{c['key']}", f"{scen}:{other}"])
-            con_rows.append({"a_id": pair[0], "b_id": pair[1], "detected_at": recorded_at})
-
-    _unwind(db, sup_rows, """
-MATCH (new:Claim {id: row.new_id}), (old:Claim {id: row.old_id})
-CREATE (new)-[:SUPERSEDES {at: row.at}]->(old)""")
-    _unwind(db, con_rows, """
-MATCH (a:Claim {id: row.a_id}), (b:Claim {id: row.b_id})
-CREATE (a)-[:CONTRADICTS {resolved: false, detected_at: row.detected_at}]->(b)""")
-    stats["supersedes_edges"] = len(sup_rows)
-    stats["contradicts_edges"] = len(con_rows)
+    for claim in claims:
+        cid = f"{scen}:{claim['key']}"
+        if claim.get("supersedes"):
+            write_edge(db, "SUPERSEDES", cid, f"{scen}:{claim['supersedes']}",
+                       {"at": claim["valid_from"]})
+            stats["supersedes_edges"] += 1
+        for other in claim.get("contradicts_with", []):
+            pair = sorted([cid, f"{scen}:{other}"])
+            write_edge(db, "CONTRADICTS", pair[0], pair[1],
+                       {"resolved": False, "detected_at": recorded_at})
+            stats["contradicts_edges"] += 1
     return stats
 
 
