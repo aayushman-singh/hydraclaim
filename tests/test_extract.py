@@ -57,7 +57,7 @@ def test_build_messages_empty_active_claims():
 
 
 def test_parse_claims_roundtrip():
-    drafts, warnings = parse_claims(GOOD_RESPONSE, SESSION)
+    drafts, warnings = parse_claims(GOOD_RESPONSE, SESSION, ACTIVE)
     assert warnings == []
     assert len(drafts) == 1
     draft = drafts[0]
@@ -65,6 +65,11 @@ def test_parse_claims_roundtrip():
     assert draft["value"] == "2026-10-17"
     assert draft["supersedes"] == "deadline_drift:s3:x1"
     assert draft["session_id"] == "s6"
+
+
+ACTIVE = [{"id": "deadline_drift:s3:x1", "subject": "product launch",
+           "predicate": "deadline", "value": "2026-10-10", "valid_from": "2026-05-10",
+           "source_kind": "slack", "author": "Mina Okafor"}]
 
 
 def _single(overrides):
@@ -90,7 +95,7 @@ def test_drops_unknown_msg_id():
 
 def test_coerces_bad_scores_to_defaults():
     drafts, warnings = parse_claims(
-        _single({"confidence": "high", "explicitness": None}), SESSION
+        _single({"confidence": "high", "explicitness": None}), SESSION, ACTIVE
     )
     assert len(drafts) == 1
     assert drafts[0]["confidence"] == 0.5

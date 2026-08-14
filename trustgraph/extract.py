@@ -18,11 +18,74 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 from trustgraph.claims import PREDICATES, SOURCE_KINDS
+
+
+_MONTHS = {
+    "january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6,
+    "july": 7, "august": 8, "september": 9, "october": 10, "november": 11,
+    "december": 12,
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "jun": 6, "jul": 7, "aug": 8,
+    "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+}
+
+_DATE_RE = re.compile(
+    r"\b(?P<month>[a-z]{3,9})\s+(?P<day>\d{1,2})(?:st|nd|rd|th)?\b|\b(?P<day2>\d{1,2})\s+(?P<month2>[a-z]{3,9})\b",
+    re.IGNORECASE,
+)
+
+
+def _reference_date(msg: dict) -> date:
+    """Best-effort reference date from a message timestamp."""
+    ts = msg.get("ts", "")
+    try:
+        return date.fromisoformat(ts[:10])
+    except ValueError:
+        pass
+    try:
+        return datetime.fromisoformat(ts).date()
+    except ValueError:
+        return date.today()
+
+
+def _normalize_value(value: str, msg: dict) -> str:
+    """Convert natural-language dates in a value to YYYY-MM-DD.
+
+    If the value is already ISO-like, leave it. Otherwise look for month/day
+    patterns and resolve them using the message year.
+    """
+    value = str(value).strip()
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", value):
+        return value
+    match = _DATE_RE.search(value)
+    if not match:
+        return value
+    ref = _reference_date(msg)
+    month = match.group("month") or match.group("month2")
+    day = match.group("day") or match.group("day2")
+    try:
+        month_num = _MONTHS[month.lower()]
+        day_num = int(day)
+        normalized = date(ref.year, month_num, day_num).isoformat()
+        return normalized
+    except (KeyError, ValueError):
+        return value
+
+
+def _validate_supersedes(raw: object, active_ids: set[str]) -> tuple[str | None, str | None]:
+    """Return (target_id, warning) tuple."""
+    if raw is None or raw == "":
+        return None, None
+    if not isinstance(raw, str):
+        return None, f"supersedes must be a claim id string, got {type(raw).__name__}"
+    if raw not in active_ids:
+        return None, f"supersedes target {raw!r} is not an active claim, ignored"
+    return raw, None
 
 
 def build_messages(
@@ -45,8 +108,8 @@ def build_messages(
 
 Rules:
 - Only extract claims whose predicate is one of: {", ".join(sorted(PREDICATES))}.
-- subject: use the canonical entity name from KNOWN ENTITIES (aliases are provided).
-  If a clearly named entity is missing from the roster, you may use its name as-is.
+- subject: use exactly one of the KNOWN ENTITIES names. Do not invent phrases
+  like "product launch deadline"; use "product launch".
 - value: the object of the claim, short and factual. Dates MUST be YYYY-MM-DD:
   convert natural-language dates using the message timestamp (a message dated
   2026-05-18 saying "October 17" becomes 2026-10-17). Never copy a natural
@@ -59,6 +122,8 @@ Rules:
 - supersedes: if a claim explicitly corrects or replaces one of the ACTIVE CLAIMS
   (signals like "correction", "actually", "moving", "taking over", "instead"),
   set it to that claim's id; otherwise null.
+- Extract status claims when a message says a project/person is
+  "on track", "at risk", "blocked", "complete", "delayed", "green", or "red".
 - Never invent information. If nothing qualifies, return {{"claims": []}}.
 
 Respond with strict JSON only, shape:
@@ -85,7 +150,8 @@ def _score(value: object, default: float) -> tuple[float, bool]:
     return min(max(f, 0.0), 1.0), True
 
 
-def parse_claims(response_json: object, session: dict) -> tuple[list[dict], list[str]]:
+def parse_claims(response_json: object, session: dict,
+                 active_claims: list[dict] | None = None) -> tuple[list[dict], list[str]]:
     """Validate raw LLM output into drafts. Never raises on bad LLM output —
     drops the offending claim and records a human-readable warning."""
     if isinstance(response_json, dict):
@@ -98,6 +164,7 @@ def parse_claims(response_json: object, session: dict) -> tuple[list[dict], list
         return [], ["'claims' is not a list"]
 
     by_msg_id = {m["msg_id"]: m for m in session["messages"]}
+    active_ids = {c["id"] for c in (active_claims or [])}
     drafts, warnings = [], []
     for i, raw in enumerate(raw_claims):
         where = f"claim[{i}] ({raw.get('predicate', '?') if isinstance(raw, dict) else '?'})"
@@ -134,11 +201,16 @@ def parse_claims(response_json: object, session: dict) -> tuple[list[dict], list
         if not ok:
             warnings.append(f"{where}: confidence {raw.get('confidence')!r} -> default 0.5")
 
+        value = _normalize_value(raw.get("value", ""), msg)
+        supersedes, warn = _validate_supersedes(raw.get("supersedes"), active_ids)
+        if warn:
+            warnings.append(f"{where}: {warn}")
+
         drafts.append(
             {
                 "subject": raw["subject"].strip(),
                 "predicate": raw["predicate"],
-                "value": str(raw.get("value", "")).strip(),
+                "value": value,
                 "valid_from": valid_from,
                 "quote": quote,
                 "author": str(raw.get("author") or msg["author"]),
@@ -147,7 +219,7 @@ def parse_claims(response_json: object, session: dict) -> tuple[list[dict], list
                 "msg_id": msg["msg_id"],
                 "explicitness": explicitness,
                 "confidence": confidence,
-                "supersedes": raw.get("supersedes") or None,
+                "supersedes": supersedes,
             }
         )
     return drafts, warnings
@@ -159,7 +231,7 @@ def extract_session(
     from trustgraph.llm import chat_json  # lazy: no network at import time
 
     response = chat_json(build_messages(session, entities, active_claims))
-    return parse_claims(response, session)
+    return parse_claims(response, session, active_claims)
 
 
 def _update_active(active: list[dict], drafts: list[dict]) -> list[dict]:
