@@ -24,10 +24,12 @@ class LLMError(RuntimeError):
 
 
 def _config() -> dict:
+    timeout = os.environ.get("LLM_TIMEOUT")
     return {
         "base_url": os.environ.get("LLM_BASE_URL", "https://api.moonshot.ai/v1"),
         "model": os.environ.get("LLM_MODEL", "kimi-k2"),
         "api_key": os.environ.get("LLM_API_KEY", ""),
+        "timeout": float(timeout) if timeout else 600.0,
     }
 
 
@@ -55,7 +57,7 @@ def chat(
     model: str | None = None,
     temperature: float = 0.0,
     max_tokens: int | None = None,
-    timeout: float = 60.0,
+    timeout: float | None = None,
 ) -> str:
     cfg = _config()
     if not cfg["api_key"]:
@@ -72,11 +74,12 @@ def chat(
         "Content-Type": "application/json",
     }
     url = f"{cfg['base_url'].rstrip('/')}/chat/completions"
+    request_timeout = timeout or cfg["timeout"]
 
     last_error: LLMError | None = None
     for attempt in range(3):
         try:
-            with httpx.Client(timeout=timeout) as client:
+            with httpx.Client(timeout=request_timeout) as client:
                 resp = client.post(url, json=payload, headers=headers)
             if resp.status_code >= 500:
                 last_error = LLMError(

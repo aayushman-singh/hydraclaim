@@ -149,9 +149,11 @@ real data, download `longmemeval_oracle.json` from the
 [LongMemEval HuggingFace dataset](https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned)
 and run `python -m trustgraph.longmemeval convert <file> --out data/longmemeval/scenarios`.
 
-End-to-end extraction from a local qwen3:8b via llama.cpp scores
-P=1.000 / R=0.750 / F1=0.857 on the deadline-drift scenario (see
-`python -m trustgraph.evaluate`).
+End-to-end extraction from a local llama.cpp backend scores
+P=1.000 / R=1.000 / F1=1.000 on the deadline-drift scenario (see
+`python -m trustgraph.evaluate`). Set `LLM_TIMEOUT` (default 600 s) for
+slow local backends; the extraction section of `scripts/demo.sh` runs this
+live when `LLM_API_KEY` is set.
 
 ## Recording the demo video
 
