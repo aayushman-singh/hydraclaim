@@ -26,6 +26,9 @@ card_to_video outro.png     5  outro.mp4
 
 # 3. Capture the live demo and the benchmark text output (UTF-8).
 bash scripts/demo.sh > demo/demo-output.txt 2>&1
+# The demo only ingests 2 scenarios; the benchmark covers all 8, so ingest
+# the rest first (idempotent) before capturing the ablation table.
+python -m trustgraph.ingest data/sessions/*.json > /dev/null
 python -m trustgraph.benchmark data/sessions/*.json --arm all \
   > demo/bench-output.txt 2>&1
 

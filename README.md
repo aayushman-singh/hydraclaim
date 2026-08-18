@@ -157,7 +157,7 @@ live when `LLM_API_KEY` is set.
 
 ## Recording the demo video
 
-A rendered demo video is available at **`demo/trustgraph-demo.mp4`** (~98 s, 1920×1080).
+A rendered demo video is available at **`demo/trustgraph-demo.mp4`** (~96 s, 1920×1080).
 It covers the same beats as the checklist below. Rebuild it reproducibly with:
 
 ```bash
