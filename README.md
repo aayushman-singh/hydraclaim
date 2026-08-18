@@ -78,6 +78,7 @@ python -m pytest tests/
 - `trustgraph/schema.py --verify` — probes a live node for the exact
   OpenCypher features this project depends on
 - `scripts/dev-up.sh`, `docker-compose.yml` — local single-node HydraDB
+- `demo/build-video.sh` — reproducible demo-video build (cards + live capture)
 
 ## How HydraDB is used
 
@@ -121,10 +122,10 @@ python -m trustgraph.benchmark data/sessions/*.json --arm all
 
 | Arm | Overall accuracy | Knowledge-update accuracy | Abstention P/R | Mean queries/question | p95 latency |
 |---|---|---|---|---|---|
-| Naïve RAG (top word-overlap claim) | 0.240 | 1.000 | 0.000 / 0.000 | 0.9 | 5.1 ms |
-| Question Router | 0.720 | 1.000 | 1.000 / 0.500 | 4.8 | 58.1 ms |
-| Always Deep | 0.800 | 1.000 | 1.000 / 0.500 | 5.0 | 56.7 ms |
-| Router + Graph Probe | **0.960** | 1.000 | **1.000 / 1.000** | 4.7 | 55.7 ms |
+| Naïve RAG (top word-overlap claim) | 0.240 | 1.000 | 0.000 / 0.000 | 0.9 | 3.7 ms |
+| Question Router | 0.760 | 1.000 | 1.000 / 0.500 | 4.8 | 71.3 ms |
+| Always Deep | 0.840 | 1.000 | 1.000 / 0.500 | 5.0 | 70.1 ms |
+| Router + Graph Probe | **1.000** | 1.000 | **1.000 / 1.000** | 4.7 | 71.1 ms |
 
 The naïve RAG baseline picks the single active claim with the most word overlap
 with the question. It cannot see supersession chains, cannot surface conflicts,
@@ -154,10 +155,17 @@ P=1.000 / R=0.750 / F1=0.857 on the deadline-drift scenario (see
 
 ## Recording the demo video
 
-A rendered demo video is available at **`demo/trustgraph-demo.mp4`** (86 s, 1920×1080).
-It covers the same beats as the checklist below, using the live terminal output
-from `scripts/demo.sh` and the benchmark table, captured end-to-end with a local
-llama.cpp `qwen3:8b` backend.
+A rendered demo video is available at **`demo/trustgraph-demo.mp4`** (~98 s, 1920×1080).
+It covers the same beats as the checklist below. Rebuild it reproducibly with:
+
+```bash
+bash demo/build-video.sh     # needs ffmpeg + Docker; set LLM_API_KEY for the
+                             # live extraction/evaluation section
+```
+
+The build script regenerates the title/benchmark cards (`demo/gen-cards.py`),
+captures the live `scripts/demo.sh` and benchmark output as UTF-8 text, renders
+the terminals with `demo/term-video.py`, and concatenates the sections.
 
 - [x] 0:00–0:20 — Problem: facts change; flat memory returns stale + conflicting chunks.
 - [x] 0:20–0:50 — Graph model: claims, evidence, SUPERSEDES/CONTRADICTS (show the graph).

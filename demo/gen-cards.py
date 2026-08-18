@@ -44,10 +44,10 @@ bench_text = """Benchmark: 8 scenarios, 25 questions
 
 Arm                        | Accuracy | Abstention P/R | Queries/q | p95 ms
 ---------------------------|----------|----------------|-----------|--------
-Naive RAG                  |   0.240  |  0.000 / 0.000 |     0.9   |   5.1
-Question Router            |   0.720  |  1.000 / 0.500 |     4.8   |  58.1
-Always Deep                |   0.800  |  1.000 / 0.500 |     5.0   |  56.7
-Router + Graph Probe       |   0.960  |  1.000 / 1.000 |     4.7   |  55.7
+Naive RAG                  |   0.240  |  0.000 / 0.000 |     0.9   |   3.7
+Question Router            |   0.760  |  1.000 / 0.500 |     4.8   |  71.3
+Always Deep                |   0.840  |  1.000 / 0.500 |     5.0   |  70.1
+Router + Graph Probe       |   1.000  |  1.000 / 1.000 |     4.7   |  71.1
 
 The graph probe turns vague coverage into a measurable signal,
 so the system abstains, goes cheap, or goes deep — exactly when it should."""
