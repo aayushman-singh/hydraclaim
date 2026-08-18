@@ -61,12 +61,18 @@ def write_claim(db: HydraDB, cid: str, claim: dict, entity_endpoint: str,
     db.query(f"CREATE (c:Claim {{id: {graph_id(cid)}}})-[:ABOUT]->(e:Entity {entity_endpoint})")
 
 
-def write_edge(db: HydraDB, rel: str, a_key: str, b_key: str, props: dict) -> None:
+def write_edge(db: HydraDB, rel: str, a_key: str, b_key: str, props: dict) -> bool:
+    """Create one relationship edge between two claim ids.
+
+    Returns True when the edge was created, False when it already exists
+    (idempotent re-ingest).
+    """
     a_id, b_id = graph_id(a_key), graph_id(b_key)
     if edge_exists(db, "Claim", a_id, rel, "Claim", b_id):
-        return
+        return False
     prop_str = f" {_props(props)}" if props else ""
     db.query(f"CREATE (a:Claim {{id: {a_id}}})-[:{rel}{prop_str}]->(b:Claim {{id: {b_id}}})")
+    return True
 
 
 def ingest_document(db: HydraDB, doc: dict) -> dict:
@@ -111,14 +117,14 @@ def ingest_document(db: HydraDB, doc: dict) -> dict:
     for claim in claims:
         cid = f"{scen}:{claim['key']}"
         if claim.get("supersedes"):
-            write_edge(db, "SUPERSEDES", cid, f"{scen}:{claim['supersedes']}",
-                       {"at": claim["valid_from"]})
-            stats["supersedes_edges"] += 1
+            if write_edge(db, "SUPERSEDES", cid, f"{scen}:{claim['supersedes']}",
+                          {"at": claim["valid_from"]}):
+                stats["supersedes_edges"] += 1
         for other in claim.get("contradicts_with", []):
             pair = sorted([cid, f"{scen}:{other}"])
-            write_edge(db, "CONTRADICTS", pair[0], pair[1],
-                       {"resolved": False, "detected_at": recorded_at})
-            stats["contradicts_edges"] += 1
+            if write_edge(db, "CONTRADICTS", pair[0], pair[1],
+                          {"resolved": False, "detected_at": recorded_at}):
+                stats["contradicts_edges"] += 1
     return stats
 
 
