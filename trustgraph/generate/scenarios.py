@@ -379,8 +379,8 @@ def dependency_unblocked() -> dict:
         "events": [
             _ev(3, "s1", "slack", "Engineering lead", "#eng",
                 "Checkout rollout status: blocked by the search service outage.",
-                [_claim("dep-1", "checkout rollout", "status", "blocked by search service", 3,
-                        "Checkout rollout status: blocked by the search service",
+                [_claim("dep-1", "checkout rollout", "status", "blocked by search service outage", 3,
+                        "Checkout rollout status: blocked by the search service outage",
                         "Engineering lead", "slack")]),
             _ev(8, "s2", "slack", "Engineering lead", "#eng",
                 "Search service is back online — checkout rollout is now unblocked.",
