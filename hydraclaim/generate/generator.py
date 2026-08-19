@@ -21,8 +21,8 @@ import random
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 
-from trustgraph.claims import validate_scenario
-from trustgraph.generate import scenarios
+from hydraclaim.claims import validate_scenario
+from hydraclaim.generate import scenarios
 
 BASE_DATE = date(2026, 5, 4)
 

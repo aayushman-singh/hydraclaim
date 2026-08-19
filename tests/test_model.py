@@ -1,6 +1,6 @@
 """Pure-helper tests for the HydraDB dialect model mappings (no live DB)."""
 
-from trustgraph.model import (
+from hydraclaim.model import (
     OPEN,
     claim_props,
     entity_props,
@@ -9,7 +9,7 @@ from trustgraph.model import (
     slug,
     split_aliases,
 )
-from trustgraph.probe import _chain_depth
+from hydraclaim.probe import _chain_depth
 
 
 class TestGraphId:

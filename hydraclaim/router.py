@@ -20,9 +20,9 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from trustgraph.claims import PREDICATES
-from trustgraph.probe import ProbeResult
-from trustgraph.reconcile import canonicalize_entity
+from hydraclaim.claims import PREDICATES
+from hydraclaim.probe import ProbeResult
+from hydraclaim.reconcile import canonicalize_entity
 
 ROUTE_FAST = "FAST"
 ROUTE_DEEP = "DEEP"
@@ -53,6 +53,48 @@ _TEMPORAL_MARKERS = ("before", "previously", "used to", "originally",
                      "at the start", "earlier", "last week", "last month",
                      "was blocking", "blocking the")
 _UPDATE_MARKERS = ("current", "currently", "now", "latest", "today")
+
+
+_CLASSIFIER_SYSTEM = """Classify the question for an agent memory system. Respond with strict JSON only.
+
+subject: the entity the question asks about, as a short noun phrase. null if no entity is mentioned.
+
+predicate: exactly one of the memory predicates, or null when the question is not about any of them:
+  owned_by     — who owns / is responsible for a thing
+  assigned_to  — which team a person is assigned to
+  status       — on track / at risk / blocked / complete state of a thing
+  deadline     — the due date of a thing
+  decided      — a decision that was made
+  depends_on   — what a thing depends on
+  blocks       — what a thing blocks
+  reports_to   — a person's manager
+  works_on     — what a person is working on
+  located_in   — where a person is based
+  prefers      — a person's preference
+  budget       — money approved for a thing
+
+question_type: one of:
+  lookup            — a single current fact
+  temporal          — what was true at or before some time
+  knowledge_update  — the latest value after a series of changes
+  conflict          — wants contradicting records surfaced
+  multi_session     — must combine facts across sessions
+  abstention        — likely unanswerable from project history
+
+as_of: YYYY-MM-DD when the question asks about a past point in time, else null.
+
+JSON shape:
+{"subject": ..., "predicate": ..., "question_type": ..., "as_of": ...}"""
+
+
+def llm_classifier(question: str) -> dict:
+    """LLM question classification grounded in the predicate vocabulary."""
+    from hydraclaim.llm import chat_json
+
+    return chat_json([
+        {"role": "system", "content": _CLASSIFIER_SYSTEM},
+        {"role": "user", "content": question},
+    ])
 
 
 @dataclass

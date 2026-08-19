@@ -1,7 +1,7 @@
 import json
 
-from trustgraph.generate.generator import BASE_DATE, expand_scenario, write_dataset
-from trustgraph.generate.scenarios import deadline_drift, payments_owner_conflict
+from hydraclaim.generate.generator import BASE_DATE, expand_scenario, write_dataset
+from hydraclaim.generate.scenarios import deadline_drift, payments_owner_conflict
 
 
 def _doc(spec):

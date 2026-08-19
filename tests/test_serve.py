@@ -1,0 +1,147 @@
+"""Offline tests for hydraclaim.serve — no HydraDB, no network."""
+
+from __future__ import annotations
+
+import json
+
+import pytest
+
+from hydraclaim import retrieve, serve
+from hydraclaim.llm import LLMError
+
+
+class FakeDB:
+    def __init__(self, rows_by_substring=None):
+        self.rows_by_substring = rows_by_substring or {}
+        self.queries = []
+
+    def query(self, cypher, consistency="causal"):
+        self.queries.append(cypher)
+        for needle, rows in self.rows_by_substring.items():
+            if needle in cypher:
+                return rows
+        return []
+
+
+def fake_answer(db, question, **kwargs):
+    return {
+        "route": "FAST",
+        "answer": f"stub answer for: {question}",
+        "citations": [{"claim_id": "c1", "source_kind": "meeting",
+                       "author": "A", "quote": "q"}],
+        "classification": {"subject": "product launch", "predicate": "deadline"},
+        "probe": {"coverage": 1, "conflicts": 0},
+    }
+
+
+@pytest.fixture(autouse=True)
+def _stub_answer(monkeypatch):
+    monkeypatch.setattr(retrieve, "answer", fake_answer)
+
+
+def test_dispatch_health():
+    status, payload = serve.dispatch("GET", "/health", {}, None, None)
+    assert status == 200
+    assert payload == {"status": "ok"}
+
+
+def test_dispatch_unknown_endpoint():
+    status, payload = serve.dispatch("GET", "/nope", {}, None, None)
+    assert status == 404
+    assert "unknown endpoint" in payload["error"]
+
+
+def test_dispatch_ask_requires_question():
+    status, payload = serve.dispatch("POST", "/ask", {}, None, None)
+    assert status == 400
+    status, payload = serve.dispatch("POST", "/ask", {"question": "  "}, None, None)
+    assert status == 400
+
+
+def test_dispatch_ask_returns_answer():
+    status, payload = serve.dispatch("POST", "/ask",
+                                     {"question": "What is the current launch deadline?"},
+                                     FakeDB(), None)
+    assert status == 200
+    assert payload["route"] == "FAST"
+    assert payload["citations"][0]["claim_id"] == "c1"
+
+
+def test_llm_classifier_logs_loudly_and_reraises(monkeypatch, capsys):
+    """LLM classification failure is logged loudly, then the router's designed
+    heuristic degradation handles the request (covered in test_router)."""
+
+    def boom(**kwargs):
+        from hydraclaim.llm import LLMError
+        raise LLMError("deepseek unreachable")
+
+    monkeypatch.setattr(
+        "hydraclaim.router.llm_classifier",
+        lambda q: boom(),
+    )
+    with pytest.raises(LLMError):
+        serve.llm_classifier("Who owns the payments integration?")
+    err = capsys.readouterr().err
+    assert "LLM classification failed" in err
+    assert "degrading to keyword heuristic" in err
+
+
+def test_handle_scenarios_reads_generated_data():
+    payload = serve.handle_scenarios()
+    ids = {s["id"] for s in payload["scenarios"]}
+    assert "deadline_drift" in ids
+    assert all(s["questions"] for s in payload["scenarios"])
+
+
+def test_handle_graph_shapes_nodes_and_edges():
+    db = FakeDB({
+        "MATCH (e:Entity)": [{"id": 1, "name": "product launch", "type": "project"}],
+        "[:ABOUT]->(e:Entity)": [
+            {"id": 10, "key": "scen:c1", "subject": "product launch",
+             "predicate": "deadline", "value": "2026-10-17", "status": "active",
+             "valid_from": "2026-05-18", "valid_to": ""},
+            {"id": 11, "key": "scen:c0", "subject": "product launch",
+             "predicate": "deadline", "value": "2026-10-10", "status": "superseded",
+             "valid_from": "2026-05-10", "valid_to": "2026-05-18"},
+        ],
+        "[:SUPERSEDES]->": [{"src": 10, "dst": 11}],
+        "[:CONTRADICTS]->": [],
+    })
+    payload = serve.handle_graph(db)
+    nodes = {(n["id"], n["kind"]) for n in payload["nodes"]}
+    assert (1, "entity") in nodes and (10, "claim") in nodes
+    edge_types = {(e["from"], e["to"], e["type"]) for e in payload["edges"]}
+    assert (10, 11, "SUPERSEDES") in edge_types
+    assert (10, 1, "ABOUT") in edge_types  # claim linked to its entity
+
+
+def test_handler_endpoints_over_http():
+    """Smoke-test the HTTP layer with the real handler against a stub server."""
+    import http.client
+    import threading
+
+    server = serve.ThreadingHTTPServer(("127.0.0.1", 0), serve.DemoHandler)
+    server.db = FakeDB()
+    server.llm_fn = None
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    port = server.server_address[1]
+    try:
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/health")
+        resp = conn.getresponse()
+        assert resp.status == 200
+        assert json.loads(resp.read()) == {"status": "ok"}
+
+        conn.request("POST", "/ask", body=json.dumps({"question": "test?"}),
+                     headers={"Content-Type": "application/json"})
+        resp = conn.getresponse()
+        assert resp.status == 200
+        assert "stub answer" in json.loads(resp.read())["answer"]
+
+        conn.request("POST", "/ask", body=b"{not json",
+                     headers={"Content-Type": "application/json"})
+        resp = conn.getresponse()
+        assert resp.status == 400
+    finally:
+        server.shutdown()
+        server.server_close()

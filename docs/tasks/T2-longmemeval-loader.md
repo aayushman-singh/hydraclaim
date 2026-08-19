@@ -26,7 +26,7 @@ do not download the dataset and do not run ingestion.
 }
 ```
 
-## Create: `trustgraph/longmemeval.py`
+## Create: `hydraclaim/longmemeval.py`
 
 - `convert_instance(instance: dict) -> dict` — returns a scenario doc:
   - `scenario_id`: `f"lme_{question_id}"`; `description`: the question type.
@@ -47,7 +47,7 @@ do not download the dataset and do not run ingestion.
   deterministic stratified sample (random.Random(seed); shuffle per type,
   take up to cap, then fill remaining slots from the leftovers, types in
   sorted order).
-- CLI: `python -m trustgraph.longmemeval convert INPUT.json --out data/lme/
+- CLI: `python -m hydraclaim.longmemeval convert INPUT.json --out data/lme/
   [--n 100] [--seed 42] [--per-type-cap 25] [--max-history-tokens 200000]`.
   Writes one scenario doc per converted instance; skips (with a printed
   warning) instances whose estimated history tokens exceed the cap. Prints a
@@ -55,8 +55,8 @@ do not download the dataset and do not run ingestion.
 
 ## Allowed edits to existing files (exactly these, nothing else)
 
-1. `trustgraph/claims.py`: add `"chat"` to `SOURCE_KINDS`.
-2. `trustgraph/scoring.py`: add `"chat": 0.5` to `KIND_DEFAULT`.
+1. `hydraclaim/claims.py`: add `"chat"` to `SOURCE_KINDS`.
+2. `hydraclaim/scoring.py`: add `"chat": 0.5` to `KIND_DEFAULT`.
 3. `README.md`: under "## Attribution", add one line that LongMemEval data
    comes from github.com/salesforce/LongMemEval (CC-BY-NC — check the repo's
    LICENSE file and state it correctly; do not copy dataset files into this
@@ -68,7 +68,7 @@ do not download the dataset and do not run ingestion.
   msg_id sequence, ts increments, source_kind, qa mapping (use
   `temporal-reasoning` in the fixture).
 - Every `question_type` string in the mapping table maps to a valid member of
-  `trustgraph.claims.QUESTION_TYPES` (import and assert membership).
+  `hydraclaim.claims.QUESTION_TYPES` (import and assert membership).
 - `estimate_tokens` arithmetic.
 - `sample_instances`: determinism (same seed → same ids), per-type caps
   respected, refill-from-leftovers reaches n when possible.
@@ -77,8 +77,8 @@ do not download the dataset and do not run ingestion.
 ## Acceptance
 
 - `python -m pytest tests/ -q` green.
-- `python -m trustgraph.longmemeval --help` exits 0.
-- `git diff main --stat` shows: new `trustgraph/longmemeval.py`, new
+- `python -m hydraclaim.longmemeval --help` exits 0.
+- `git diff main --stat` shows: new `hydraclaim/longmemeval.py`, new
   `tests/test_longmemeval.py`, and the three allowed edits only.
 
 ## Report back

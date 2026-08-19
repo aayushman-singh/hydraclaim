@@ -7,14 +7,14 @@ from pathlib import Path
 
 import pytest
 
-from trustgraph.benchmark import (
+from hydraclaim.benchmark import (
     CountingDB,
     correct,
     router_only_route,
     run_arm,
     summarize,
 )
-from trustgraph.router import ROUTE_DEEP, ROUTE_FAST
+from hydraclaim.router import ROUTE_DEEP, ROUTE_FAST
 
 
 def test_router_only_route_maps_lookup_to_fast():
@@ -240,7 +240,7 @@ def test_correct_without_rubric_ignores_rubric_logic():
 
 
 def test_naive_answer_abstains_when_subject_missing():
-    from trustgraph.benchmark import naive_answer, ROUTE_NAIVE_RAG
+    from hydraclaim.benchmark import naive_answer, ROUTE_NAIVE_RAG
 
     class _EmptyDB:
         def query(self, cypher, consistency="causal"):
@@ -253,7 +253,7 @@ def test_naive_answer_abstains_when_subject_missing():
 
 
 def test_naive_answer_returns_top_overlapping_claim():
-    from trustgraph.benchmark import naive_answer, ROUTE_NAIVE_RAG
+    from hydraclaim.benchmark import naive_answer, ROUTE_NAIVE_RAG
 
     class _ClaimDB:
         def query(self, cypher, consistency="causal"):
@@ -269,7 +269,7 @@ def test_naive_answer_returns_top_overlapping_claim():
 
 
 def test_naive_answer_abstains_when_no_active_claims():
-    from trustgraph.benchmark import naive_answer, ROUTE_NAIVE_RAG
+    from hydraclaim.benchmark import naive_answer, ROUTE_NAIVE_RAG
 
     class _EmptyClaimDB:
         def query(self, cypher, consistency="causal"):

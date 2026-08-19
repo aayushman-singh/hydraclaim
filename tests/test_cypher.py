@@ -1,4 +1,4 @@
-from trustgraph.cypher import to_cypher_literal as lit
+from hydraclaim.cypher import to_cypher_literal as lit
 
 
 def test_scalars():

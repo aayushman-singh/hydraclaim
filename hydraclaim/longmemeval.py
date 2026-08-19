@@ -1,7 +1,7 @@
-"""LongMemEval → TrustGraph scenario converter.
+"""LongMemEval → HydraClaim scenario converter.
 
 Converts LongMemEval question instances into the scenario-document shape produced
-by `trustgraph.generate`, so the existing pipeline, retrieval, and benchmark
+by `hydraclaim.generate`, so the existing pipeline, retrieval, and benchmark
 code can run on real long-memory benchmark data without modification.
 
 This module does not download the LongMemEval dataset and does not ingest
@@ -37,12 +37,12 @@ def _parse_date(value: str) -> date:
 
 
 def _map_qtype(question_type: str) -> str:
-    """Map a LongMemEval question_type to a TrustGraph QUESTION_TYPES value."""
+    """Map a LongMemEval question_type to a HydraClaim QUESTION_TYPES value."""
     return QTYPE_MAP.get(question_type, "lookup")
 
 
 def convert_instance(instance: dict) -> dict:
-    """Convert one LongMemEval instance to a TrustGraph scenario document."""
+    """Convert one LongMemEval instance to a HydraClaim scenario document."""
     qid = instance["question_id"]
     session_ids = instance.get("haystack_session_ids", [])
     session_dates = instance.get("haystack_dates", [])
@@ -111,7 +111,7 @@ def estimate_tokens(doc: dict) -> int:
 def sample_instances(
     instances: list[dict], n: int, seed: int, per_type_cap: int
 ) -> list[dict]:
-    """Deterministic stratified sample by mapped TrustGraph question type.
+    """Deterministic stratified sample by mapped HydraClaim question type.
 
     For each type (in sorted order), the instances are shuffled with
     ``random.Random(seed)`` and up to ``per_type_cap`` are selected.  If the
@@ -186,11 +186,11 @@ def _convert_command(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="trustgraph.longmemeval")
+    parser = argparse.ArgumentParser(prog="hydraclaim.longmemeval")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     convert_parser = subparsers.add_parser(
-        "convert", help="convert LongMemEval instances to TrustGraph scenario docs"
+        "convert", help="convert LongMemEval instances to HydraClaim scenario docs"
     )
     convert_parser.add_argument("input", help="path to a LongMemEval JSON file")
     convert_parser.add_argument("--out", required=True, help="output directory")

@@ -1,11 +1,11 @@
 """HydraDB feature-verification battery — the D1 spike as a runnable tool.
 
-HydraDB supports a *subset* of OpenCypher. Everything TrustGraph relies on
+HydraDB supports a *subset* of OpenCypher. Everything HydraClaim relies on
 is probed here against a live node, so we learn on day 1 (not day 5) if a
 feature is missing. Probe nodes are labelled TGProbe and carry a per-run
 `run` id; cleanup is best-effort.
 
-CLI: python -m trustgraph.schema --verify
+CLI: python -m hydraclaim.schema --verify
 """
 
 from __future__ import annotations
@@ -13,14 +13,14 @@ from __future__ import annotations
 import argparse
 import uuid
 
-from trustgraph.db import HydraDB, HydraDBError
+from hydraclaim.db import HydraDB, HydraDBError
 
 
 def _probes(run: str) -> list[tuple[str, list[str]]]:
     """(name, statements) pairs; statements run in order, last one is checked.
 
     Every probe uses only the verified HydraDB v0.1 dialect that the codebase
-    depends on (see trustgraph/model.py): integer node ids, scalar properties,
+    depends on (see hydraclaim/model.py): integer node ids, scalar properties,
     one-hop CREATE patterns whose endpoints upsert by `id`, label/property-
     scoped MATCH, and no IS NULL / length() / undirected matches.
     """
@@ -92,15 +92,15 @@ def verify(db: HydraDB) -> bool:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="trustgraph.schema")
+    parser = argparse.ArgumentParser(prog="hydraclaim.schema")
     parser.add_argument("--verify", action="store_true",
-                        help="probe a live HydraDB node for the features TrustGraph needs")
+                        help="probe a live HydraDB node for the features HydraClaim needs")
     args = parser.parse_args()
     if not args.verify:
         parser.print_help()
         return
 
-    from trustgraph.config import connect
+    from hydraclaim.config import connect
 
     with connect() as db:
         ok = verify(db)

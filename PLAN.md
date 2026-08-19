@@ -1,4 +1,4 @@
-# TrustGraph — Hack Hydra (Track 3) Build Plan
+# HydraClaim — Hack Hydra (Track 3) Build Plan
 
 **Hackathon:** Hack Hydra, Aug 12–20, 2026. Submissions close **Aug 20, 11:59 PM PT**
 (form + ≤3-min demo video + public GitHub repo). Today is Aug 13 → **7 days left**.
@@ -9,7 +9,7 @@ how HydraDB is used; HydraDB itself is AGPL v3 (using it as a server over Bolt/H
 
 ## One-liner
 
-> **TrustGraph is conflict-aware temporal memory for agents: every fact is a claim with
+> **HydraClaim is conflict-aware temporal memory for agents: every fact is a claim with
 > provenance and a validity window, contradictions and overwrites are first-class graph
 > structure in HydraDB, and a graph-probe router answers simple questions cheaply,
 > escalates conflicted ones, and abstains when the graph can't back an answer.**
@@ -101,12 +101,12 @@ score(claim, q) = 0.35 * authority(source.kind, q.predicate)
 
 Replace the absolutes with:
 
-- "Vector memory retrieves text and re-derives state at read time. TrustGraph stores state
+- "Vector memory retrieves text and re-derives state at read time. HydraClaim stores state
   *transitions* (SUPERSEDES, CONTRADICTS) as structure, so 'what is true now / at time T'
   is a query, not an inference over retrieved chunks."
 - "Routing is driven by measured graph state — conflict count, evidence coverage,
   supersession depth — rather than inferred from question phrasing alone."
-- "TrustGraph abstains on typed-predicate coverage: if no claim exists for the asked
+- "HydraClaim abstains on typed-predicate coverage: if no claim exists for the asked
   (subject, predicate) it declines and says what it searched. Embedding thresholds
   approximate this; the graph version is exact per predicate and explainable."
 

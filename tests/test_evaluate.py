@@ -1,4 +1,4 @@
-from trustgraph.evaluate import evaluate
+from hydraclaim.evaluate import evaluate
 
 SCENARIO = {
     "scenario_id": "mini",

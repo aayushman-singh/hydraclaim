@@ -13,7 +13,7 @@ HYDRADB_CELL = os.environ.get("HYDRADB_CELL", "cell-0")
 
 def connect():
     """Open a HydraDB client from the current environment."""
-    from trustgraph.db import HydraDB  # lazy: keeps httpx out of offline paths
+    from hydraclaim.db import HydraDB  # lazy: keeps httpx out of offline paths
 
     return HydraDB(
         base_url=HYDRADB_URL,

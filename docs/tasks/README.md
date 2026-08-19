@@ -1,4 +1,4 @@
-# Execution tasks for TrustGraph (Hack Hydra, due Aug 20 11:59 PM PT)
+# Execution tasks for HydraClaim (Hack Hydra, due Aug 20 11:59 PM PT)
 
 Each `T*.md` file here is a self-contained work order for an executing agent.
 Read this file first, then the task file, then the code it references.
@@ -14,8 +14,8 @@ Read this file first, then the task file, then the code it references.
    HydraDB, no LLM calls (inject fakes, like `tests/test_router.py` does with
    `llm_fn`).
 3. **No new dependencies.** Everything uses `httpx` + `pytest` only. LLM
-   access goes through `trustgraph/llm.py`; graph access through
-   `trustgraph/db.py`; Cypher strings through `to_cypher_literal`.
+   access goes through `hydraclaim/llm.py`; graph access through
+   `hydraclaim/db.py`; Cypher strings through `to_cypher_literal`.
 4. **Style**: `from __future__ import annotations`, module docstrings, type
    hints, small pure functions separated from IO (see `reconcile.py` for the
    pattern). Match the tone of neighboring files.
@@ -24,7 +24,7 @@ Read this file first, then the task file, then the code it references.
    function signature changed), STOP: implement nothing speculative, note the
    mismatch in your final report, and let the reviewer decide.
 6. Environment: Windows + Git Bash, Python 3.11.9. Paths below are relative
-   to the repo root (`C:/Repo/trustgraph`).
+   to the repo root (`C:/Repo/hydraclaim`).
 
 ## Project orientation (5 minutes)
 

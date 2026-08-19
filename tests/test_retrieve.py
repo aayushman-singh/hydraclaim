@@ -1,6 +1,6 @@
 import re
 
-from trustgraph.retrieve import (
+from hydraclaim.retrieve import (
     abstain_message,
     abstain_uncovered_message,
     answer,

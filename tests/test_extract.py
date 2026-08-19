@@ -1,4 +1,4 @@
-from trustgraph.extract import _update_active, build_messages, parse_claims
+from hydraclaim.extract import _update_active, build_messages, parse_claims
 
 SESSION = {
     "session_id": "s6",

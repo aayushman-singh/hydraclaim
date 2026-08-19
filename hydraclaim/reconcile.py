@@ -22,9 +22,9 @@ from __future__ import annotations
 import re
 from datetime import datetime, timezone
 
-from trustgraph.cypher import to_cypher_literal as lit
-from trustgraph.db import HydraDB
-from trustgraph.model import entity_key, entity_props, graph_id
+from hydraclaim.cypher import to_cypher_literal as lit
+from hydraclaim.db import HydraDB
+from hydraclaim.model import entity_key, entity_props, graph_id
 
 
 def _norm(value: object) -> str:
@@ -144,7 +144,7 @@ def apply_plan(db: HydraDB, plan: dict, scenario_id: str,
     `entities` is the scenario roster; aliases are used when creating an
     entity node for the first time.
     """
-    from trustgraph.ingest import _props, edge_exists, node_exists, write_claim
+    from hydraclaim.ingest import _props, edge_exists, node_exists, write_claim
 
     recorded_at = datetime.now(timezone.utc).isoformat()
     stats = {"scenario": scenario_id, "created": 0, "entities_created": 0,

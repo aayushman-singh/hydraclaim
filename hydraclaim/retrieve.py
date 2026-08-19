@@ -21,11 +21,11 @@ import re
 from dataclasses import asdict
 from datetime import datetime, timezone
 
-from trustgraph.cypher import to_cypher_literal as lit
-from trustgraph.db import HydraDB
-from trustgraph.model import split_aliases
-from trustgraph.probe import probe
-from trustgraph.router import (
+from hydraclaim.cypher import to_cypher_literal as lit
+from hydraclaim.db import HydraDB
+from hydraclaim.model import split_aliases
+from hydraclaim.probe import probe
+from hydraclaim.router import (
     ROUTE_ABSTAIN,
     ROUTE_DEEP,
     ROUTE_FAST,
@@ -33,7 +33,7 @@ from trustgraph.router import (
     classify,
     decide_route,
 )
-from trustgraph.scoring import rank_claims
+from hydraclaim.scoring import rank_claims
 
 
 def fetch_entities(db: HydraDB) -> list[dict]:

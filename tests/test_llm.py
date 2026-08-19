@@ -1,6 +1,6 @@
 import pytest
 
-from trustgraph.llm import LLMError, extract_json
+from hydraclaim.llm import LLMError, extract_json
 
 
 def test_plain_object():
@@ -27,7 +27,7 @@ def test_truncated_json_raises():
 
 
 def test_chat_requires_api_key(monkeypatch):
-    from trustgraph import llm
+    from hydraclaim import llm
 
     monkeypatch.delenv("LLM_API_KEY", raising=False)
     with pytest.raises(LLMError, match="LLM_API_KEY"):

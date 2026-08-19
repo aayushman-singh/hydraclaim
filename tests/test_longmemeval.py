@@ -1,5 +1,5 @@
-from trustgraph.claims import QUESTION_TYPES
-from trustgraph.longmemeval import convert_instance, estimate_tokens, sample_instances
+from hydraclaim.claims import QUESTION_TYPES
+from hydraclaim.longmemeval import convert_instance, estimate_tokens, sample_instances
 
 
 def _fixture_instance(question_type="temporal-reasoning"):

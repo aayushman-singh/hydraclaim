@@ -82,7 +82,7 @@ class HydraDB:
         return rows[0] if rows else None
 
     def node_exists(self, label: str, node_id: str) -> bool:
-        from trustgraph.cypher import to_cypher_literal
+        from hydraclaim.cypher import to_cypher_literal
 
         row = self.query_one(
             f"MATCH (n:{label} {{id: {to_cypher_literal(node_id)}}}) RETURN n.id AS id LIMIT 1"

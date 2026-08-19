@@ -13,7 +13,7 @@ vice versa. Metrics:
   Drafts need ids for this metric (the extract CLI assigns them); without
   ids the metric is reported as None.
 
-CLI: python -m trustgraph.evaluate SCENARIO_JSON DRAFTS_JSON
+CLI: python -m hydraclaim.evaluate SCENARIO_JSON DRAFTS_JSON
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ import argparse
 import json
 from pathlib import Path
 
-from trustgraph.reconcile import _norm, canonicalize_entity
+from hydraclaim.reconcile import _norm, canonicalize_entity
 
 
 def load_ground_truth(scenario_doc: dict) -> list[dict]:
@@ -110,9 +110,9 @@ def evaluate(drafts: list[dict], scenario_doc: dict, roster: list[dict] | None =
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="trustgraph.evaluate")
+    parser = argparse.ArgumentParser(prog="hydraclaim.evaluate")
     parser.add_argument("scenario", help="scenario JSON (ground truth)")
-    parser.add_argument("drafts", help="drafts JSON from trustgraph.extract --emit")
+    parser.add_argument("drafts", help="drafts JSON from hydraclaim.extract --emit")
     args = parser.parse_args()
 
     doc = json.loads(Path(args.scenario).read_text(encoding="utf-8"))

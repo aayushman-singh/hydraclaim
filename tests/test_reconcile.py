@@ -1,4 +1,4 @@
-from trustgraph.reconcile import canonicalize_entity, plan_writes
+from hydraclaim.reconcile import canonicalize_entity, plan_writes
 
 ROSTER = [
     {"name": "Priya Shah", "type": "person", "aliases": ["Priya", "@priya"]},

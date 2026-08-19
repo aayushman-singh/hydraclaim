@@ -4,7 +4,7 @@ Per session: extract claims (with the current active claims as context),
 plan the writes deterministically, apply them, then re-read active claims
 from the graph so the next session's prompt sees real graph ids.
 
-CLI: python -m trustgraph.pipeline SCENARIO_JSON [...]
+CLI: python -m hydraclaim.pipeline SCENARIO_JSON [...]
 Requires a live HydraDB node (scripts/dev-up.sh) and LLM_API_KEY.
 """
 
@@ -15,9 +15,9 @@ import json
 import sys
 from pathlib import Path
 
-from trustgraph.db import HydraDB
-from trustgraph.extract import extract_session
-from trustgraph.reconcile import apply_plan, plan_writes
+from hydraclaim.db import HydraDB
+from hydraclaim.extract import extract_session
+from hydraclaim.reconcile import apply_plan, plan_writes
 
 
 def fetch_active_claims(db: HydraDB) -> list[dict]:
@@ -69,11 +69,11 @@ def run_pipeline(db: HydraDB, doc: dict) -> dict:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="trustgraph.pipeline")
+    parser = argparse.ArgumentParser(prog="hydraclaim.pipeline")
     parser.add_argument("scenarios", nargs="+", help="scenario JSON files")
     args = parser.parse_args()
 
-    from trustgraph.config import connect
+    from hydraclaim.config import connect
 
     with connect() as db:
         for path in args.scenarios:

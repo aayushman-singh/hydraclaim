@@ -13,33 +13,33 @@ the 3-minute video is mechanical. PLAN.md "Demo video beats" is the script.
 `set -euo pipefail`, run from repo root (`cd "$(dirname "$0")/.."`). Sections,
 each with a printed banner:
 
-1. `python -m trustgraph.generate` (fresh deterministic data).
+1. `python -m hydraclaim.generate` (fresh deterministic data).
 2. If `docker` is available: `bash scripts/dev-up.sh` (idempotent) — otherwise
    print "Docker not available; skipping live sections" and exit 0.
 3. Reset the graph so the demo is repeatable: HTTP DELETE is NOT available —
-   instead use `python -c` with `trustgraph.config.connect()` running
+   instead use `python -c` with `hydraclaim.config.connect()` running
    `MATCH (n) DETACH DELETE n` (wrap in a comment noting it is demo-only).
 4. Oracle ingestion of both scenarios:
-   `python -m trustgraph.ingest data/sessions/payments_owner_conflict.json
+   `python -m hydraclaim.ingest data/sessions/payments_owner_conflict.json
    data/sessions/deadline_drift.json`.
-5. The four demo questions from PLAN.md, run with `python -m trustgraph.ask
+5. The four demo questions from PLAN.md, run with `python -m hydraclaim.ask
    ... --verbose`, each preceded by a printed header:
    - `Who owns the payments integration?`        (conflict → DEEP)
    - `What is the current launch deadline?`      (knowledge update → DEEP, chain)
    - `What was the launch deadline last week?`   (temporal → DEEP, as-of)
    - `What is the payments integration's uptime SLA?` (→ ABSTAIN)
 6. Optional (behind `[ -n "${LLM_API_KEY:-}" ]`): run
-   `python -m trustgraph.extract data/sessions/deadline_drift.json --emit
-   /tmp/tg-drafts.json` and `python -m trustgraph.evaluate
+   `python -m hydraclaim.extract data/sessions/deadline_drift.json --emit
+   /tmp/tg-drafts.json` and `python -m hydraclaim.evaluate
    data/sessions/deadline_drift.json /tmp/tg-drafts.json` to show extraction
    quality live.
 
 `bash -n scripts/demo.sh` must be clean. Keep it POSIX-ish (Git Bash on
 Windows runs it).
 
-## 2. Edit: `trustgraph/ask.py` (allowed edit)
+## 2. Edit: `hydraclaim/ask.py` (allowed edit)
 
-Add `--repl`: after handling flags, loop `input("trustgraph> ")` until EOF or
+Add `--repl`: after handling flags, loop `input("hydraclaim> ")` until EOF or
 empty line, calling the same answer path per question (reuse one db
 connection for the loop). Keep the single-question behavior unchanged. No new
 imports beyond stdlib.
@@ -61,9 +61,9 @@ Append two sections:
 ## Acceptance
 
 - `bash -n scripts/demo.sh` clean; `python -m pytest tests/ -q` green;
-  `python -m trustgraph.ask --help` shows `--repl`.
+  `python -m hydraclaim.ask --help` shows `--repl`.
 - `git diff main --stat` shows: new `scripts/demo.sh`, edits to
-  `trustgraph/ask.py` and `README.md`, and this task file marked done.
+  `hydraclaim/ask.py` and `README.md`, and this task file marked done.
 
 ## Report back
 

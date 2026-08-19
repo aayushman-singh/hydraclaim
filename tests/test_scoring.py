@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from trustgraph.scoring import (
+from hydraclaim.scoring import (
     author_authority,
     authority,
     rank_claims,

@@ -1,9 +1,9 @@
-"""Benchmark harness for the TrustGraph routing story.
+"""Benchmark harness for the HydraClaim routing story.
 
 Runs four ablation arms over scenario ground-truth QA and reports accuracy,
 abstention quality, latency, and retrieval cost per question.
 
-    python -m trustgraph.benchmark data/sessions/*.json --arm all
+    python -m hydraclaim.benchmark data/sessions/*.json --arm all
 """
 
 from __future__ import annotations
@@ -18,9 +18,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from trustgraph.db import HydraDB
-from trustgraph.retrieve import answer, fetch_entities
-from trustgraph.router import ROUTE_DEEP, ROUTE_FAST, classify
+from hydraclaim.db import HydraDB
+from hydraclaim.retrieve import answer, fetch_entities
+from hydraclaim.router import ROUTE_DEEP, ROUTE_FAST, classify
 
 REFUSAL_PHRASE = "don't have any recorded information"
 ROUTE_NAIVE_RAG = "NAIVE_RAG"
@@ -35,7 +35,7 @@ def naive_answer(db: CountingDB, question: str, roster: list[dict]) -> dict:
 
     Does not use SUPERSEDES/CONTRADICTS edges or predicate coverage — it just
     returns the most word-overlapping active claim. This is the 're-derive
-    everything from retrieved chunks' story that TrustGraph avoids.
+    everything from retrieved chunks' story that HydraClaim avoids.
     """
     cls = classify(question, roster)
     if cls.subject is None:
@@ -46,7 +46,7 @@ def naive_answer(db: CountingDB, question: str, roster: list[dict]) -> dict:
             "citations": [],
         }
 
-    from trustgraph.cypher import to_cypher_literal as lit
+    from hydraclaim.cypher import to_cypher_literal as lit
     rows = db.query(
         f"MATCH (c:Claim)-[:ABOUT]->(e:Entity {{name: {lit(cls.subject)}}}) "
         "RETURN c.predicate AS predicate, c.value AS value, c.status AS status, "
@@ -302,7 +302,7 @@ def _expand_paths(patterns: list[str]) -> list[Path]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="trustgraph.benchmark")
+    parser = argparse.ArgumentParser(prog="hydraclaim.benchmark")
     parser.add_argument("scenarios", nargs="+", help="scenario JSON files or globs")
     parser.add_argument(
         "--arm",
@@ -321,7 +321,7 @@ def main() -> None:
         else [args.arm]
     )
 
-    from trustgraph.config import connect
+    from hydraclaim.config import connect
 
     results_dir = Path("results")
     results_dir.mkdir(parents=True, exist_ok=True)

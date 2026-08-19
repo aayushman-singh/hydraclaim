@@ -1,7 +1,7 @@
 """Query CLI — the demo surface.
 
-    python -m trustgraph.ask "Who owns the payments integration?"
-    python -m trustgraph.ask "What is the current launch deadline?" --verbose
+    python -m hydraclaim.ask "Who owns the payments integration?"
+    python -m hydraclaim.ask "What is the current launch deadline?" --verbose
 
 Requires a live HydraDB node populated via ingest or pipeline. Answers are
 deterministic; no LLM key is needed at query time. --llm enables LLM
@@ -16,17 +16,9 @@ import os
 
 
 def _llm_classifier(question: str) -> dict:
-    from trustgraph.llm import chat_json
+    from hydraclaim.router import llm_classifier
 
-    return chat_json([
-        {"role": "system", "content": (
-            "Classify the question for a memory system. Respond with strict JSON: "
-            '{"subject": <entity name or null>, "predicate": <one of the memory '
-            "predicates or null>, \"question_type\": <lookup|temporal|conflict|"
-            "knowledge_update|multi_session|abstention>, \"as_of\": <YYYY-MM-DD or "
-            'null>}')},
-        {"role": "user", "content": question},
-    ])
+    return llm_classifier(question)
 
 
 def _print_result(result: dict, verbose: bool) -> None:
@@ -42,7 +34,7 @@ def _print_result(result: dict, verbose: bool) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="trustgraph.ask")
+    parser = argparse.ArgumentParser(prog="hydraclaim.ask")
     parser.add_argument("question", nargs="?",
                         help="natural-language question (required unless --repl)")
     parser.add_argument("--verbose", "-v", action="store_true",
@@ -55,14 +47,14 @@ def main() -> None:
 
     llm_fn = _llm_classifier if args.llm and os.environ.get("LLM_API_KEY") else None
 
-    from trustgraph.config import connect
-    from trustgraph.retrieve import answer
+    from hydraclaim.config import connect
+    from hydraclaim.retrieve import answer
 
     if args.repl:
         with connect() as db:
             while True:
                 try:
-                    question = input("trustgraph> ")
+                    question = input("hydraclaim> ")
                 except EOFError:
                     break
                 if not question.strip():

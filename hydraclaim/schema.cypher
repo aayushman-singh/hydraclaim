@@ -1,6 +1,6 @@
-// TrustGraph graph model on HydraDB (documentation + canonical queries).
+// HydraClaim graph model on HydraDB (documentation + canonical queries).
 // Feature support is verified against a live node by:
-//     python -m trustgraph.schema --verify
+//     python -m hydraclaim.schema --verify
 //
 // ---------------------------------------------------------------------------
 // Node shapes

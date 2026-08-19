@@ -8,9 +8,9 @@ PLAN.md defines the proof for the routing story: three arms — **Always Deep**,
 **Question Router**, **Router + Graph Probe** — compared on accuracy, abstention
 quality, and cost. Build the runner that produces that table.
 
-## Create: `trustgraph/benchmark.py`
+## Create: `hydraclaim/benchmark.py`
 
-Reuse `trustgraph/retrieve.py::answer(db, question, *, force_route=...)` — it
+Reuse `hydraclaim/retrieve.py::answer(db, question, *, force_route=...)` — it
 already returns `{"route", "answer", "citations", "classification", "probe"}`.
 Do not modify retrieve.py.
 
@@ -44,7 +44,7 @@ Public surface:
   arm, columns: accuracy overall, per-qtype accuracy, abstention P/R,
   mean queries/question, p50/p95 latency. This table goes in the demo video
   and README.
-- CLI: `python -m trustgraph.benchmark data/sessions/*.json --arm all`
+- CLI: `python -m hydraclaim.benchmark data/sessions/*.json --arm all`
   writes `results/benchmark-<UTC timestamp>.json` (arm results + summary)
   and prints the markdown table. `--arm router+probe|router-only|always-deep|all`.
 
@@ -66,8 +66,8 @@ that is an allowed edit).
 ## Acceptance
 
 - `python -m pytest tests/ -q` green (62 existing + yours).
-- `python -m trustgraph.benchmark --help` exits 0.
-- `git diff main --stat` shows only: new `trustgraph/benchmark.py`,
+- `python -m hydraclaim.benchmark --help` exits 0.
+- `git diff main --stat` shows only: new `hydraclaim/benchmark.py`,
   new `tests/test_benchmark.py`, `.gitignore` (+1 line), and this task file
   marked done below.
 

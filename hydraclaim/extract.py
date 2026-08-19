@@ -8,7 +8,7 @@ ClaimDraft contract (shared with reconcile.py):
     source_kind (slack|linear|meeting), session_id, msg_id,
     explicitness (0..1), confidence (0..1), supersedes (graph id or null)
 
-CLI: python -m trustgraph.extract SCENARIO_JSON [--emit drafts.json]
+CLI: python -m hydraclaim.extract SCENARIO_JSON [--emit drafts.json]
 Threads state across sessions: drafts from earlier sessions become the
 active-claims context for later ones (synthetic ids `{scenario}:x{N}`),
 so the LLM can link overwrites to claims it created itself.
@@ -23,7 +23,7 @@ import sys
 from datetime import date, datetime
 from pathlib import Path
 
-from trustgraph.claims import PREDICATES, SOURCE_KINDS
+from hydraclaim.claims import PREDICATES, SOURCE_KINDS
 
 
 _MONTHS = {
@@ -228,7 +228,7 @@ def parse_claims(response_json: object, session: dict,
 def extract_session(
     session: dict, entities: list[dict], active_claims: list[dict]
 ) -> tuple[list[dict], list[str]]:
-    from trustgraph.llm import chat_json  # lazy: no network at import time
+    from hydraclaim.llm import chat_json  # lazy: no network at import time
 
     response = chat_json(build_messages(session, entities, active_claims))
     return parse_claims(response, session, active_claims)
@@ -255,7 +255,7 @@ def _update_active(active: list[dict], drafts: list[dict]) -> list[dict]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="trustgraph.extract")
+    parser = argparse.ArgumentParser(prog="hydraclaim.extract")
     parser.add_argument("scenario", help="scenario JSON file (sessions + entities)")
     parser.add_argument("--emit", metavar="OUT_JSON", help="write drafts to this file")
     args = parser.parse_args()

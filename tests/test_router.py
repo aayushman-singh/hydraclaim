@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
-from trustgraph.probe import ProbeResult
-from trustgraph.router import (
+from hydraclaim.probe import ProbeResult
+from hydraclaim.router import (
     ROUTE_ABSTAIN,
     ROUTE_DEEP,
     ROUTE_FAST,

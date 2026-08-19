@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HydraClaim — conflict-aware temporal agent memory</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <h1>HydraClaim</h1>
+    <span class="tagline">conflict-aware temporal memory for agents</span>
+  </div>
+  <nav>
+    <span id="status-pill" class="pill pending">connecting…</span>
+    <a href="https://github.com/aayushman-singh/trustgraph">GitHub</a>
+  </nav>
+</header>
+
+<main>
+  <section id="chat-panel">
+    <div id="samples" class="samples"></div>
+    <div id="chat" class="chat"></div>
+    <form id="ask-form">
+      <input id="question" type="text" autocomplete="off"
+             placeholder="Ask about deadlines, owners, status…" autofocus>
+      <button type="submit">Ask</button>
+    </form>
+  </section>
+
+  <section id="graph-panel">
+    <h2>Memory graph <span id="graph-meta"></span></h2>
+    <div id="graph"></div>
+    <div class="legend">
+      <span><i class="dot entity"></i> entity</span>
+      <span><i class="dot active"></i> active claim</span>
+      <span><i class="dot superseded"></i> superseded claim</span>
+      <span><i class="edge sup"></i> SUPERSEDES</span>
+      <span><i class="edge con"></i> CONTRADICTS</span>
+    </div>
+  </section>
+</main>
+
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

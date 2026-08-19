@@ -15,8 +15,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from trustgraph.cypher import to_cypher_literal as lit
-from trustgraph.db import HydraDB
+from hydraclaim.cypher import to_cypher_literal as lit
+from hydraclaim.db import HydraDB
 
 
 @dataclass

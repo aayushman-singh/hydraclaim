@@ -1,4 +1,4 @@
-"""TrustGraph — conflict-aware temporal agent memory on HydraDB.
+"""HydraClaim — conflict-aware temporal agent memory on HydraDB.
 
 Hack Hydra 2026, Track 3 (memory and context retrieval). See PLAN.md.
 """

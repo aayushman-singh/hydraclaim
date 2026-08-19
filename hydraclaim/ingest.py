@@ -9,7 +9,7 @@ CREATE whose endpoints upsert by integer `id`. Nodes are skipped when they
 already exist, so re-ingesting a document is safe. Edges are created only
 between id-known endpoints.
 
-CLI: python -m trustgraph.ingest data/sessions/deadline_drift.json [...]
+CLI: python -m hydraclaim.ingest data/sessions/deadline_drift.json [...]
 """
 
 from __future__ import annotations
@@ -19,9 +19,9 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from trustgraph.cypher import to_cypher_literal as lit
-from trustgraph.db import HydraDB
-from trustgraph.model import (
+from hydraclaim.cypher import to_cypher_literal as lit
+from hydraclaim.db import HydraDB
+from hydraclaim.model import (
     claim_props,
     entity_key,
     entity_props,
@@ -129,11 +129,11 @@ def ingest_document(db: HydraDB, doc: dict) -> dict:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="trustgraph.ingest")
+    parser = argparse.ArgumentParser(prog="hydraclaim.ingest")
     parser.add_argument("documents", nargs="+", help="scenario JSON files to ingest")
     args = parser.parse_args()
 
-    from trustgraph.config import connect
+    from hydraclaim.config import connect
 
     with connect() as db:
         for path in args.documents:
