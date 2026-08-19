@@ -405,6 +405,324 @@ def dependency_unblocked() -> dict:
     }
 
 
+def deep_supersession_chain() -> dict:
+    """A price/deadline overwritten four times — deep chain + origin lookup."""
+    return {
+        "scenario_id": "deep_supersession_chain",
+        "description": "A server budget is revised four times; the earliest commit is recoverable.",
+        "entities": [
+            {"name": "infra refresh", "type": "project",
+             "aliases": ["infra", "refresh", "infrastructure upgrade"]},
+            {"name": "DevOps Bot", "type": "system", "aliases": ["devops"]},
+        ],
+        "events": [
+            _ev(0, "s1", "meeting", "Meeting notes", "fireflies",
+                "Infra refresh budget set at $40k for the quarter.",
+                [_claim("irb-1", "infra refresh", "budget", "$40,000", 0,
+                        "Infra refresh budget set at $40k", "Meeting notes", "meeting")]),
+            _ev(4, "s2", "slack", "DevOps Bot", "#infra",
+                "Budget corrected to $48k after the capacity estimate landed.",
+                [_claim("irb-2", "infra refresh", "budget", "$48,000", 4,
+                        "Budget corrected to $48k", "DevOps Bot", "slack", supersedes="irb-1")]),
+            _ev(9, "s3", "slack", "DevOps Bot", "#infra",
+                "Updated infra refresh budget to $55k — networking scope added.",
+                [_claim("irb-3", "infra refresh", "budget", "$55,000", 9,
+                        "infra refresh budget to $55k", "DevOps Bot", "slack", supersedes="irb-2")]),
+            _ev(15, "s4", "meeting", "Meeting notes", "fireflies",
+                "Final call: infra refresh budget is $60k effective immediately.",
+                [_claim("irb-4", "infra refresh", "budget", "$60,000", 15,
+                        "infra refresh budget is $60k", "Meeting notes", "meeting", supersedes="irb-3")]),
+        ],
+        "qa": [
+            {"question": "What is the current infra refresh budget?",
+             "answer": "$60,000",
+             "qtype": "knowledge_update",
+             "gold_claim_keys": ["irb-4"]},
+            {"question": "What was the infra refresh budget before the most recent change?",
+             "answer": "$55,000",
+             "qtype": "temporal",
+             "gold_claim_keys": ["irb-3"]},
+            {"question": "What was the very first infra refresh budget?",
+             "answer": "$40,000",
+             "rubric": ["$40,000"],
+             "qtype": "lookup",
+             "gold_claim_keys": ["irb-1"]},
+            {"question": "What is the infra refresh uptime target?",
+             "answer": "ABSTAIN",
+             "qtype": "abstention",
+             "gold_claim_keys": []},
+        ],
+    }
+
+
+def latent_value_conflict() -> dict:
+    """Two active values for one predicate with NO typed CONTRADICTS edge."""
+    return {
+        "scenario_id": "latent_value_conflict",
+        "description": "Two sources assert different owners; no contradiction was ever recorded.",
+        "entities": [
+            {"name": "onboarding flow", "type": "project",
+             "aliases": ["onboarding", "signup flow"]},
+            {"name": "Dev Bot", "type": "system", "aliases": ["dev bot"]},
+        ],
+        "events": [
+            _ev(2, "s1", "meeting", "Meeting notes", "fireflies",
+                "Onboarding flow is owned by the Platform engineering team.",
+                [_claim("onw-1", "onboarding flow", "owned_by", "Platform engineering", 2,
+                        "onboarding flow is owned by the Platform engineering team",
+                        "Meeting notes", "meeting")]),
+            _ev(9, "s2", "slack", "Dev Bot", "#growth",
+                "Onboarding flow ownership moved to the Growth team, per the reorg.",
+                [_claim("onw-2", "onboarding flow", "owned_by", "Growth team", 9,
+                        "Onboarding flow ownership moved to the Growth team",
+                        "Dev Bot", "slack")]),
+        ],
+        "qa": [
+            {"question": "Who owns the onboarding flow?",
+             "answer": ("Unresolved conflict: the platform and growth teams both claim the "
+                        "onboarding flow. The records were never reconciled."),
+             "rubric": ["conflict", "Platform engineering", "Growth team"],
+             "qtype": "conflict",
+             "gold_claim_keys": ["onw-1", "onw-2"]},
+            {"question": "Who owned the onboarding flow before the reorg?",
+             "answer": "Platform engineering",
+             "qtype": "temporal",
+             "gold_claim_keys": ["onw-1"]},
+            {"question": "What is the onboarding flow's conversion target?",
+             "answer": "ABSTAIN",
+             "qtype": "abstention",
+             "gold_claim_keys": []},
+        ],
+    }
+
+
+def alias_only_reference() -> dict:
+    """The question names the entity by an alias only, never its canonical name."""
+    return {
+        "scenario_id": "alias_only_reference",
+        "description": "The query refers to the 'search' system by a nickname no ticket uses.",
+        "entities": [
+            {"name": "search relevance", "type": "system",
+             "aliases": ["search", "the ranker", "rank service"]},
+            {"name": "Ada Osei", "type": "person", "aliases": ["Ada", "@ada"]},
+        ],
+        "events": [
+            _ev(0, "s1", "meeting", "Meeting notes", "fireflies",
+                "Ada Osei will own the search relevance work for the quarter.",
+                [_claim("al-1", "search relevance", "owned_by", "Ada Osei", 0,
+                        "Ada Osei will own the search relevance work", "Meeting notes", "meeting")]),
+            _ev(6, "s2", "slack", "Ada Osei", "#search",
+                "Starting on the ranker today — relevance cutover is next Monday.",
+                [_claim("al-2", "Ada Osei", "works_on", "search relevance", 6,
+                        "Starting on the ranker", "Ada Osei", "slack", explicitness=0.9)]),
+        ],
+        "qa": [
+            {"question": "Who owns the search relevance work?",
+             "answer": "Ada Osei",
+             "qtype": "knowledge_update",
+             "gold_claim_keys": ["al-1"]},
+            {"question": "Who is working on the ranker now?",
+             "answer": "Ada Osei",
+             "qtype": "knowledge_update",
+             "gold_claim_keys": ["al-2"]},
+            {"question": "What metrics does the rank service track?",
+             "answer": "ABSTAIN",
+             "qtype": "abstention",
+             "gold_claim_keys": []},
+        ],
+    }
+
+
+def exact_as_of_read() -> dict:
+    """An 'as of' query landing exactly on the day a deadline changed."""
+    return {
+        "scenario_id": "exact_as_of_read",
+        "description": "A delivery commitment shifts; the query asks 'as of' the exact switch day.",
+        "entities": [
+            {"name": "checkout revamp", "type": "project",
+             "aliases": ["checkout revamp", "the revamp"]},
+            {"name": "Nadia Hsu", "type": "person", "aliases": ["Nadia", "@nadia"]},
+        ],
+        "events": [
+            _ev(0, "s1", "meeting", "Meeting notes", "fireflies",
+                "Checkout revamp ships on June 15.",
+                [_claim("eo-1", "checkout revamp", "deadline", "2026-06-15", 0,
+                        "Checkout revamp ships on June 15", "Meeting notes", "meeting")]),
+            _ev(10, "s2", "slack", "Nadia Hsu", "#checkout",
+                "Moved the checkout revamp to June 22 — the tax changes need a week more.",
+                [_claim("eo-2", "checkout revamp", "deadline", "2026-06-22", 10,
+                        "Moved the checkout revamp to June 22", "Nadia Hsu", "slack",
+                        supersedes="eo-1")]),
+        ],
+        "qa": [
+            {"question": "What is the current checkout revamp deadline?",
+             "answer": "2026-06-22",
+             "qtype": "knowledge_update",
+             "gold_claim_keys": ["eo-2"]},
+            {"question": "What was the checkout revamp deadline as of the day the tax change was announced?",
+             "answer": "2026-06-15",
+             "qtype": "temporal",
+             "gold_claim_keys": ["eo-1"]},
+            {"question": "What is the checkout revamp's regional launch scope?",
+             "answer": "ABSTAIN",
+             "qtype": "abstention",
+             "gold_claim_keys": []},
+        ],
+    }
+
+
+def multi_vendor_decision() -> dict:
+    """A decision synthesised across sessions with a later contradiction."""
+    return {
+        "scenario_id": "multi_vendor_decision",
+        "description": "A vendor is picked in one meeting, then challenged in Slack late.",
+        "entities": [
+            {"name": "email platform", "type": "system",
+             "aliases": ["email", "email vendor"]},
+            {"name": "Tara Ellis", "type": "person", "aliases": ["Tara", "@tara"]},
+        ],
+        "events": [
+            _ev(0, "s1", "meeting", "Meeting notes", "fireflies",
+                "Decided: the email platform will be SendGrid for the next year.",
+                [_claim("mv-1", "email platform", "decided", "SendGrid", 0,
+                        "the email platform will be SendGrid", "Meeting notes", "meeting")]),
+            _ev(5, "s2", "slack", "Tara Ellis", "#email",
+                "Pushed back in the thread: Mailgun is the better deal and we should switch before contracting.",
+                [_claim("mv-2", "email platform", "decided", "Mailgun", 5,
+                        "Mailgun is the better deal", "Tara Ellis", "slack")]),
+        ],
+        "qa": [
+            {"question": "Which email platform was decided on?",
+             "answer": ("Unresolved conflict: the planning meeting picked SendGrid, but Tara "
+                        "later argued for Mailgun. Both decisions were recorded and never reconciled."),
+             "rubric": ["SendGrid", "Mailgun"],
+             "qtype": "conflict",
+             "gold_claim_keys": ["mv-1", "mv-2"]},
+            {"question": "Which email platform was initially decided on?",
+             "answer": "SendGrid",
+             "qtype": "temporal",
+             "gold_claim_keys": ["mv-1"]},
+            {"question": "What is the email platform's annual cost?",
+             "answer": "ABSTAIN",
+             "qtype": "abstention",
+             "gold_claim_keys": []},
+        ],
+    }
+
+
+def reporting_chain() -> dict:
+    """A reports_to chain: owner handoff in one branch, manager lookup elsewhere."""
+    return {
+        "scenario_id": "reporting_chain",
+        "description": "Who a person reports to, plus a stale direct-report edge elsewhere.",
+        "entities": [
+            {"name": "Ivy Norton", "type": "person", "aliases": ["Ivy", "@ivy"]},
+            {"name": "Omar Reyes", "type": "person", "aliases": ["Omar", "@omar"]},
+            {"name": "Priya Shah", "type": "person", "aliases": ["Priya", "@priya"]},
+        ],
+        "events": [
+            _ev(0, "s1", "linear", "HR Bot", "hr",
+                "HR-11: Ivy Norton reports to Omar Reyes.",
+                [_claim("rp-1", "Ivy Norton", "reports_to", "Omar Reyes", 0,
+                        "Ivy Norton reports to Omar Reyes", "HR Bot", "linear")]),
+            _ev(3, "s2", "slack", "Ivy Norton", "#general",
+                "Tagging Omar — I'm now reporting to Priya Shah starting today.",
+                [_claim("rp-2", "Ivy Norton", "reports_to", "Priya Shah", 3,
+                        "I'm now reporting to Priya Shah", "Ivy Norton", "slack", supersedes="rp-1")]),
+            _ev(4, "s3", "linear", "HR Bot", "hr",
+                "HR-12: Omar Reyes still listed as Ivy Norton's manager (stale).",
+                [_claim("rp-3", "Ivy Norton", "reports_to", "Omar Reyes", 4,
+                        "Omar Reyes still listed as Ivy Norton's manager", "HR Bot", "linear")]),
+        ],
+        "qa": [
+            {"question": "Who does Ivy Norton report to?",
+             "answer": "Priya Shah",
+             "qtype": "knowledge_update",
+             "gold_claim_keys": ["rp-2"]},
+            {"question": "Who did Ivy Norton report to before the change?",
+             "answer": "Omar Reyes",
+             "qtype": "temporal",
+             "gold_claim_keys": ["rp-1"]},
+            {"question": "What is Ivy Norton's direct deposit account?",
+             "answer": "ABSTAIN",
+             "qtype": "abstention",
+             "gold_claim_keys": []},
+        ],
+    }
+
+
+def partial_status_chain() -> dict:
+    """Mixed chain where an intermediate supersession is missing (gap tests depth)."""
+    return {
+        "scenario_id": "partial_status_chain",
+        "description": "A blocker resolves without a recorded intermediate step; only head + tail.",
+        "entities": [
+            {"name": "billing service", "type": "system",
+             "aliases": ["billing", "billing svc"]},
+            {"name": "Ravi Nair", "type": "person", "aliases": ["Ravi", "@ravi"]},
+        ],
+        "events": [
+            _ev(0, "s1", "slack", "Ravi Nair", "#eng",
+                "Billing service is blocked by the payments outage.",
+                [_claim("bs-1", "billing service", "status", "blocked by payments outage", 0,
+                        "billing service is blocked by the payments outage", "Ravi Nair", "slack")]),
+            _ev(3, "s2", "slack", "Ravi Nair", "#eng",
+                "Payments is back; billing service has resumed normal operation.",
+                [_claim("bs-2", "billing service", "status", "operational", 3,
+                        "billing service resumed normal operation", "Ravi Nair", "slack", supersedes="bs-1")]),
+        ],
+        "qa": [
+            {"question": "What is the current status of the billing service?",
+             "answer": "operational",
+             "qtype": "knowledge_update",
+             "gold_claim_keys": ["bs-2"]},
+            {"question": "What was blocking the billing service?",
+             "answer": "payments outage",
+             "qtype": "temporal",
+             "gold_claim_keys": ["bs-1"]},
+            {"question": "What is the billing service's error budget?",
+             "answer": "ABSTAIN",
+             "qtype": "abstention",
+             "gold_claim_keys": []},
+        ],
+    }
+
+
+def prefers_shift() -> dict:
+    """A preference predicate with a clean supersede — tests non-temporally-ringed facts."""
+    return {
+        "scenario_id": "prefers_shift",
+        "description": "An engineer's preferred language shifts; org note lags the decision.",
+        "entities": [
+            {"name": "Samir Ali", "type": "person", "aliases": ["Samir", "@samir"]},
+        ],
+        "events": [
+            _ev(0, "s1", "meeting", "Meeting notes", "fireflies",
+                "Samir Ali prefers TypeScript for greenfield services.",
+                [_claim("pf-1", "Samir Ali", "prefers", "TypeScript", 0,
+                        "Samir Ali prefers TypeScript", "Meeting notes", "meeting")]),
+            _ev(8, "s2", "slack", "Samir Ali", "#general",
+                "I've moved to Go for new services, overriding my earlier preference.",
+                [_claim("pf-2", "Samir Ali", "prefers", "Go", 8,
+                        "I've moved to Go for new services", "Samir Ali", "slack", supersedes="pf-1")]),
+        ],
+        "qa": [
+            {"question": "What language does Samir Ali prefer now?",
+             "answer": "Go",
+             "qtype": "knowledge_update",
+             "gold_claim_keys": ["pf-2"]},
+            {"question": "What language did Samir Ali prefer originally?",
+             "answer": "TypeScript",
+             "qtype": "temporal",
+             "gold_claim_keys": ["pf-1"]},
+            {"question": "What is Samir Ali's GitHub handle?",
+             "answer": "ABSTAIN",
+             "qtype": "abstention",
+             "gold_claim_keys": []},
+        ],
+    }
+
+
 SCENARIOS = [
     payments_owner_conflict,
     deadline_drift,
@@ -414,4 +732,12 @@ SCENARIOS = [
     team_assignment_change,
     location_change,
     dependency_unblocked,
+    deep_supersession_chain,
+    latent_value_conflict,
+    alias_only_reference,
+    exact_as_of_read,
+    multi_vendor_decision,
+    reporting_chain,
+    partial_status_chain,
+    prefers_shift,
 ]

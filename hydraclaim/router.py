@@ -42,7 +42,7 @@ _PREDICATE_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     ("decided", ("decid", "approved")),
     ("depends_on", ("depend", "blocked by", "waiting on")),
     ("blocks", ("blocks",)),
-    ("reports_to", ("reports to", "manager")),
+    ("reports_to", ("reports to", "report to", "reporting to", "manager")),
     ("works_on", ("working on", "works on")),
     ("located_in", ("located", "based in", "based", "where is", "where was", "where does")),
     ("prefers", ("prefer",)),
@@ -51,7 +51,7 @@ _PREDICATE_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
 
 _TEMPORAL_MARKERS = ("before", "previously", "used to", "originally",
                      "at the start", "earlier", "last week", "last month",
-                     "was blocking", "blocking the")
+                     "was blocking", "blocking the", "as of")
 _UPDATE_MARKERS = ("current", "currently", "now", "latest", "today")
 
 
