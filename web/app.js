@@ -616,11 +616,16 @@ function setupMinimap(network, colorById) {
       });
 
       // Draw the current viewport: visible region derived from the camera's
-      // center and scale (documented vis-network API — reliable across zooms).
+      // center and scale. getWidth/getHeight are NOT on the Network in 9.x, so
+      // read the container element's size instead.
       const vp = network.getViewPosition(); // {x, y} canvas coords of view center
       const netScale = network.getScale();
-      const vwHalf = network.getWidth() / (netScale * 2);
-      const vhHalf = network.getHeight() / (netScale * 2);
+      const dom = network.body.container || document.getElementById("graph");
+      const domW = dom ? (dom.clientWidth || 0) : 0;
+      const domH = dom ? (dom.clientHeight || 0) : 0;
+      const vwHalf = (netScale > 0 && domW > 0) ? domW / (netScale * 2) : 0;
+      const vhHalf = (netScale > 0 && domH > 0) ? domH / (netScale * 2) : 0;
+      if (vwHalf <= 0 || vhHalf <= 0) return;
       const tl = { x: vp.x - vwHalf, y: vp.y - vhHalf };
       const br = { x: vp.x + vwHalf, y: vp.y + vhHalf };
       const [vx1, vy1] = map(tl.x, tl.y);
