@@ -77,9 +77,9 @@ class RateLimiter:
 # Tuned for a public demo: /ask burns one DeepSeek classification, /ingest burns
 # several. Deterministic reads are unlimited.
 LIMITS = {
-    "ask": (20, 3600),
-    "ingest": (5, 3600),
-    "suggestions": (10, 3600),
+    "ask": (60, 3600),
+    "ingest": (8, 3600),
+    "suggestions": (20, 3600),
 }
 
 limiter = RateLimiter(LIMITS)
