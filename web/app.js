@@ -557,57 +557,61 @@ function setupMinimap(network) {
   }
 
   function nodeColor(n) {
-    if (n.color && n.color.background) return n.color.background;
+    if (n && n.color && n.color.background) return n.color.background;
     return "#8b5cf6";
   }
 
   function render() {
-    ctx.clearRect(0, 0, MW, MH);
-    const positions = network.getPositions(); // {id: {x, y}} in canvas coords
-    const ids = Object.keys(positions);
-    if (!ids.length) return;
+    try {
+      ctx.clearRect(0, 0, MW, MH);
+      const positions = network.getPositions(); // {id: {x, y}} in canvas coords
+      const ids = Object.keys(positions);
+      if (!ids.length) return;
 
-    // Full graph bounds (canvas coordinate space).
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    ids.forEach((id) => {
-      const p = positions[id];
-      if (!p) return;
-      if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
-      if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
-    });
-    const gw = (maxX - minX) || 1;
-    const gh = (maxY - minY) || 1;
+      // Full graph bounds (canvas coordinate space).
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      ids.forEach((id) => {
+        const p = positions[id];
+        if (!p) return;
+        if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
+        if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
+      });
+      const gw = (maxX - minX) || 1;
+      const gh = (maxY - minY) || 1;
 
-    // Fit the full graph into the minimap with a small inset.
-    const pad = 6;
-    const scale = Math.min((MW - pad * 2) / gw, (MH - pad * 2) / gh);
-    const offX = (MW - gw * scale) / 2;
-    const offY = (MH - gh * scale) / 2;
-    const map = (px, py) => [offX + (px - minX) * scale, offY + (py - minY) * scale];
+      // Fit the full graph into the minimap with a small inset.
+      const pad = 6;
+      const scale = Math.min((MW - pad * 2) / gw, (MH - pad * 2) / gh);
+      const offX = (MW - gw * scale) / 2;
+      const offY = (MH - gh * scale) / 2;
+      const map = (px, py) => [offX + (px - minX) * scale, offY + (py - minY) * scale];
 
-    // Draw node points.
-    const nodeSet = network.body.data.nodes; // DataSet
-    ids.forEach((id) => {
-      const p = positions[id];
-      const n = nodeSet.get(id);
-      const [mx, my] = map(p.x, p.y);
-      drawNodeGlyph(mx, my, 1.6, nodeColor(n));
-    });
+      // Draw node points.
+      const nodeSet = network.body.data.nodes; // DataSet
+      ids.forEach((id) => {
+        const p = positions[id];
+        if (!p) return;
+        const n = nodeSet.get(id);
+        if (!n) return; // id present in positions but not resolvable — skip
+        const [mx, my] = map(p.x, p.y);
+        drawNodeGlyph(mx, my, 1.6, nodeColor(n));
+      });
 
-    // Draw the current viewport.
-    // topLeft Canvas offset: network.canvasToDOM gives DOM coords; to get the
-    // canvas corners we use the DOM size and network.canvasToDOM backwards.
-    const domTopLeft = network.canvasToDOM({ x: minX, y: minY });
-    const vw = network.getWidth();
-    const vh = network.getHeight();
-    // Visible canvas region = the current camera window.
-    const tl = network.DOMtoCanvas({ x: 0, y: 0 });
-    const br = network.DOMtoCanvas({ x: vw, y: vh });
-    const [vx1, vy1] = map(tl.x, tl.y);
-    const [vx2, vy2] = map(br.x, br.y);
-    ctx.strokeStyle = "rgba(139, 92, 246, 0.9)";
-    ctx.lineWidth = 1.5;
-    ctx.strokeRect(vx1, vy1, Math.max(6, vx2 - vx1), Math.max(6, vy2 - vy1));
+      // Draw the current viewport (visible canvas region).
+      const vw = network.getWidth();
+      const vh = network.getHeight();
+      const tl = network.DOMtoCanvas({ x: 0, y: 0 });
+      const br = network.DOMtoCanvas({ x: vw, y: vh });
+      const [vx1, vy1] = map(tl.x, tl.y);
+      const [vx2, vy2] = map(br.x, br.y);
+      ctx.strokeStyle = "rgba(139, 92, 246, 0.9)";
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(vx1, vy1, Math.max(6, vx2 - vx1), Math.max(6, vy2 - vy1));
+    } catch (err) {
+      // The minimap is decorative; never let an overlay glitch take down the
+      // whole graph on a camera-draw event.
+      console.warn("minimap render skipped:", err);
+    }
   }
 
   // Redraw on every frame where the camera moves.
