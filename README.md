@@ -1,97 +1,45 @@
 # HydraClaim
 
-**Conflict-aware temporal memory for agents, built on HydraDB.**
-Every fact is a claim with provenance and a validity window; contradictions
-and overwrites are first-class graph structure; a graph-probe router answers
-simple questions cheaply, escalates conflicted ones, and abstains when the
-graph can't back an answer.
+**Conflict-aware temporal memory for AI agents, built on HydraDB.**
 
-Hack Hydra 2026 (Aug 12–20), Track 3 — memory and context retrieval.
-Build plan: [PLAN.md](PLAN.md).
+Agents forget what changed and when. HydraClaim turns agent memory into a
+temporal claim graph: every fact is a claim with provenance and a validity
+window, contradictions and overwrites are first-class graph structure, and a
+graph-probe router answers cheaply, escalates conflicted questions, and —
+crucially — abstains when the graph can't back an answer.
 
-## Live demo
+> Built for [Hack Hydra 2026](https://hackhydra.com), Track 3 — Memory and
+> context retrieval.
 
-- **App**: https://hydraclaim.aayushman.dev  (fallback: https://hydraclaim.vercel.app)
-- **API**: https://hydraclaim-api.aayushman.dev  (`/ask`, `/graph`, `/scenarios`, `/health`)
-- **Source**: https://github.com/aayushman-singh/hydraclaim
+[![MIT license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
+[![Hack Hydra 2026](https://img.shields.io/badge/Hack%20Hydra-2026-8b5cf6.svg)](#)
 
-The app is a static frontend served by Caddy on a Contabo VM, talking to a
-read-only backend (`hydraclaim.serve`, stdlib HTTP) on the API subdomain.
-The backend runs HydraDB (Docker, bound to localhost), pre-ingested with the
-8 benchmark scenarios, and uses DeepSeek (`deepseek-chat`) for question
-classification. The graph data and pre-ingested scenarios are fixed; any
-question is answered live against HydraDB with DeepSeek classification.
+## Demo
 
-## Quickstart
+Try it live:
 
-Requires Python 3.11+ and Docker (for the local HydraDB node).
+- **App** — https://hydraclaim.aayushman.dev
+- **API** — https://hydraclaim-api.aayushman.dev (`/ask`, `/graph`, `/scenarios`, `/health`)
 
-```bash
-pip install -r requirements.txt
+The app is a static page wired to a live HydraDB graph pre-ingested with 16
+scenarios. Ask it about deadlines, owners, conflicts, or facts it has never
+recorded.
 
-# 1. Start a local HydraDB node (HTTP on 8443, Bolt on 7687)
-bash scripts/dev-up.sh
+## Features
 
-# 2. Verify HydraDB supports every Cypher feature this project needs
-python -m hydraclaim.schema --verify
-
-# 3. Generate the synthetic benchmark data (deterministic)
-python -m hydraclaim.generate
-
-# 4. Ingest a scenario into HydraDB
-python -m hydraclaim.ingest data/sessions/deadline_drift.json
-```
-
-With an LLM endpoint configured (`LLM_API_KEY`, optionally `LLM_BASE_URL`
-and `LLM_MODEL` — defaults are Moonshot/Kimi), the extraction pipeline:
-
-```bash
-# Local llama.cpp example (start `llama-server` on an OpenAI-compatible port)
-# LLM_BASE_URL=http://127.0.0.1:8311/v1 LLM_API_KEY=sk-local LLM_MODEL=qwen3-8b
-
-# Extract claims offline (no HydraDB needed) and score them against ground truth
-python -m hydraclaim.extract data/sessions/deadline_drift.json --emit drafts.json
-python -m hydraclaim.evaluate data/sessions/deadline_drift.json drafts.json
-
-# Or run the full pipeline: extract -> reconcile -> write into HydraDB
-python -m hydraclaim.pipeline data/sessions/deadline_drift.json
-
-# Ask questions (routes via the graph probe; no LLM key needed at query time)
-python -m hydraclaim.ask "What is the current launch deadline?" --verbose
-```
-
-Run the offline test suite (no HydraDB needed):
-
-```bash
-python -m pytest tests/
-```
-
-## Repo map
-
-- `hydraclaim/schema.cypher` — the graph model and canonical queries
-  (current truth, time travel, supersession chains, conflicts, coverage)
-- `hydraclaim/db.py` — HydraDB client over the HTTP JSON query API
-- `hydraclaim/claims.py` — closed predicate vocabulary + ground-truth validation
-- `hydraclaim/generate/` — deterministic synthetic session generator
-  (scripted overwrites, cross-source contradictions, abstention probes)
-- `hydraclaim/ingest.py` — writes a scenario into HydraDB as the
-  claim/evidence graph (idempotent, batched `UNWIND`)
-- `hydraclaim/llm.py` + `hydraclaim/extract.py` — LLM claim extraction
-  (grounded quotes, closed predicate vocab, overwrite linking)
-- `hydraclaim/reconcile.py` — deterministic supersede/contradict/dedup rules
-- `hydraclaim/evaluate.py` — claim-level precision/recall vs. ground truth
-- `hydraclaim/pipeline.py` — extract → reconcile → write, per session
-- `hydraclaim/probe.py` + `hydraclaim/router.py` — two-stage routing
-  (classify → graph probe → FAST / DEEP / ABSTAIN)
-- `hydraclaim/scoring.py` — predicate-specific trust scoring for conflicts
-- `hydraclaim/retrieve.py` + `hydraclaim/ask.py` — retrieval paths,
-  deterministic cited answers, and the demo CLI
-- `docs/tasks/` — self-contained execution specs for the remaining work
-  (benchmark harness, LongMemEval loader, demo polish)
-- `hydraclaim/schema.py --verify` — probes a live node for the exact
-  OpenCypher features this project depends on
-- `scripts/dev-up.sh`, `docker-compose.yml` — local single-node HydraDB
-- `demo/build-video.sh` — reproducible demo-video build (cards + live capture)
+- **Supersession chains** — overwrites are typed `SUPERSEDES` edges; history is
+  never destroyed, and any fact's full timeline is a bounded graph traversal.
+- **Conflict detection** — `CONTRADICTS` edges mark unresolved disagreements;
+  predicate-specific trust scoring arbitrates instead of silently averaging.
+- **Typed abstention** — if no claim covers the asked `(subject, predicate)`, the
+  system refuses and reports the gap. No nearest-chunk guessing.
+- **Bitemporal reads** — recording time and validity windows make *"what was true
+  as of T"* a filter, not an inference.
+- **Graph-probe routing** — 2–3 bounded Cypher queries classify a question as
+  `FAST` / `DEEP` / `ABSTAIN`, so cheap answers stay cheap and hard ones escalate.
+- **Cited answers** — every answer traces to the verbatim quote, author, and
+  source that support it.
 
 ## How HydraDB is used
 
@@ -111,6 +59,176 @@ Without HydraDB, conflict detection, time-travel queries, and
 typed-coverage abstention would all require ad-hoc scans over a document
 store.
 
+## Quickstart
+
+Requires Python 3.11+ and Docker (for the local HydraDB node).
+
+```bash
+git clone https://github.com/aayushman-singh/hydraclaim.git
+cd hydraclaim
+pip install -r requirements.txt
+
+# 1. Start a local HydraDB node (HTTP on 8443, Bolt on 7687)
+bash scripts/dev-up.sh
+
+# 2. Verify HydraDB supports every Cypher feature this project needs
+python -m hydraclaim.schema --verify
+
+# 3. Generate the synthetic benchmark data (deterministic)
+python -m hydraclaim.generate
+
+# 4. Ingest a scenario into HydraDB
+python -m hydraclaim.ingest data/sessions/deadline_drift.json
+
+# 5. Run the API server (serves /ask, /graph, /scenarios, /health)
+python -m hydraclaim.serve --host 127.0.0.1 --port 8000
+```
+
+To run the web app locally against your own server, edit `web/config.js` and
+point `window.HYDRACLAIM_API` at `http://127.0.0.1:8000`, then serve the `web/`
+folder from any static server (e.g. `python -m http.server` in `web/`).
+The API sends `Access-Control-Allow-Origin: *`, so a plain site works.
+
+### Ask a question from the CLI
+
+```bash
+# Question classification uses DeepSeek when LLM_API_KEY is set
+# (LLM_BASE_URL / LLM_MODEL are optional); otherwise a keyword heuristic routes.
+python -m hydraclaim.ask "What is the current launch deadline?" --verbose
+```
+
+### Use the extraction pipeline
+
+Requires an LLM endpoint (`LLM_API_KEY`, optionally `LLM_BASE_URL` and `LLM_MODEL`):
+
+```bash
+# Extract claims and score them against ground truth
+python -m hydraclaim.extract data/sessions/deadline_drift.json --emit drafts.json
+python -m hydraclaim.evaluate data/sessions/deadline_drift.json drafts.json
+
+# Or run the full pipeline: extract -> reconcile -> write into HydraDB
+python -m hydraclaim.pipeline data/sessions/deadline_drift.json
+```
+
+### Run the tests
+
+```bash
+python -m pytest tests/
+```
+
+> **Note:** this is a hackathon prototype that doubles as a benchmark harness,
+> not a production library. The API exposes write endpoints (`/ingest`,
+> `/ingest/slack`) intended for the demo flow; secure it behind a write key
+> before deploying outside a hackathon.
+
+## Architecture
+
+```
+  Raw text / Slack / meeting notes
+        │
+        ▼
+  ┌─────────────┐    closed predicate vocab
+  │  Extraction  │──  (LLM: grounded quotes,
+  │  (LLM)       │    overwrite linking)
+  └──────┬───────┘
+         ▼
+  ┌─────────────┐    deterministic supersede /
+  │ Reconciler   │──  contradict / dedup rules
+  └──────┬───────┘
+         ▼
+  ┌─────────────┐    batched UNWIND writes
+  │  HydraDB    │──  (claims, evidence, edges)
+  └──────┬───────┘
+         ▼
+  ┌─────────────┐    classify → graph probe →
+  │  Router      │──  FAST / DEEP / ABSTAIN
+  └──────┬───────┘
+         ▼
+     Cited answer
+```
+
+**Two-stage routing:**
+
+1. **Classify** (one LLM call) — extract subject, predicate, time scope, question type.
+2. **Graph probe** (2–3 bounded Cypher queries, no LLM) — measure coverage, conflicts, supersession depth.
+
+| Probe result | Route |
+|---|---|
+| Zero claims for (subject, predicate) | **ABSTAIN** — decline and report the gap |
+| No conflicts, depth ≤ 1, simple lookup | **FAST** — single Cypher query → short answer + citations |
+| Conflicts or deep supersession chain | **DEEP** — pull conflict subgraph → trust scoring → timeline + citations |
+
+## Results
+
+Synthetic conflict suite, **50 questions across 16 scenarios** (oracle ground-truth
+ingestion):
+
+```bash
+python -m hydraclaim.benchmark data/sessions/*.json --arm all
+```
+
+| Arm | Accuracy | Abstention P/R | Queries/q | p95 latency |
+|---|---|---|---|---|
+| Naïve RAG (top word-overlap claim) | 0.280 | 0.000 / 0.000 | 1.0 | 123 ms |
+| Question Router | 0.680 | 0.857 / 0.375 | 4.8 | 1043 ms |
+| Always Deep | 0.780 | 0.857 / 0.375 | 5.0 | 622 ms |
+| **Router + Graph Probe** | **0.980** | **0.941 / 1.000** | 4.7 | 733 ms |
+
+The suite covers supersession chains up to depth 3, typed and untyped (latent)
+value conflicts, alias-only entity references, and as-of boundary reads. The
+naïve RAG baseline picks the single active claim with the most word overlap.
+It cannot see supersession chains, cannot surface conflicts, and guesses on every
+abstention question. The graph probe gives typed coverage: it abstains when no
+claim backs the question, escalates when conflicts or overwrites exist, and
+answers cheaply only when the graph is clean. The single router+probe failure is
+a subject/object inversion ("who works on X" vs "X is worked on by who") — a
+documented closed-vocabulary limitation, not a retrieval error.
+
+**Why HydraDB?** The typed edges (`SUPERSEDES`, `CONTRADICTS`, `ABOUT`) and
+property bitemporal filters are the reason the probe is cheap and exact. A flat
+chunk store would have to re-derive chronology, conflict, and coverage at query
+time; here they are materialized graph structure. Results are reproducible with
+a single command against a freshly ingested 16-scenario graph and are written to
+`results/` (generated when you run the harness; not committed).
+
+**LongMemEval**: we piloted the oracle subset; HydraClaim's closed predicate
+vocabulary is tuned for structured project-memory claims and does not cleanly
+extract open-ended personal-dialogue facts with a small local model. We
+therefore report the scaled synthetic suite above as the primary ablation, which
+exercises the same five LongMemEval abilities (IE, multi-session, temporal,
+knowledge update, abstention) in the system's intended domain. To try the
+converter on the real data, download `longmemeval_oracle.json` from the
+[LongMemEval HuggingFace dataset](https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned)
+and run `python -m hydraclaim.longmemeval convert <file> --out data/longmemeval/scenarios`.
+
+End-to-end extraction from a local model scores `P=1.000 / R=1.000 / F1=1.000`
+on the deadline-drift scenario (see `python -m hydraclaim.evaluate`). Extraction
+is LLM-only; every query-path answer is deterministic.
+
+## Repo map
+
+| Path | Purpose |
+|---|---|
+| `hydraclaim/schema.cypher` | Graph model and canonical queries |
+| `hydraclaim/db.py` | HydraDB client (HTTP JSON query API) |
+| `hydraclaim/claims.py` | Closed predicate vocabulary + ground-truth validation |
+| `hydraclaim/generate/` | Deterministic synthetic session generator |
+| `hydraclaim/ingest.py` | Writes scenarios into HydraDB (idempotent, batched `UNWIND`) |
+| `hydraclaim/extract.py` | LLM claim extraction (grounded quotes, overwrite linking) |
+| `hydraclaim/reconcile.py` | Deterministic supersede / contradict / dedup rules |
+| `hydraclaim/evaluate.py` | Claim-level precision / recall vs. ground truth |
+| `hydraclaim/pipeline.py` | Extract → reconcile → write, per session |
+| `hydraclaim/probe.py` | Graph probe queries (coverage, conflicts, depth) |
+| `hydraclaim/router.py` | Two-stage routing (classify → probe → route) |
+| `hydraclaim/scoring.py` | Predicate-specific trust scoring for conflicts |
+| `hydraclaim/retrieve.py` | Retrieval paths (fast + deep) |
+| `hydraclaim/ask.py` | Deterministic cited answers and CLI |
+| `hydraclaim/serve.py` | API server for the web frontend |
+| `hydraclaim/benchmark.py` | Ablation benchmark harness |
+| `web/` | Frontend (static HTML/CSS/JS, vis-network graph) |
+| `scripts/dev-up.sh` | Local single-node HydraDB via Docker |
+| `docker-compose.yml` | Docker Compose for HydraDB |
+
 ## Attribution
 
 - [HydraDB](https://github.com/hydra-db/hydradb) — graph database (AGPL v3),
@@ -118,74 +236,7 @@ store.
 - [LongMemEval](https://github.com/xiaowu0162/LongMemEval) — benchmark data and
   question format (MIT License), used as a converter source; dataset files are
   not copied into or redistributed from this repository.
-- Benchmark shape follows LongMemEval (Wu et al., arXiv:2410.10813).
 
 ## License
 
 MIT — see [LICENSE](LICENSE).
-
-## Results
-
-Synthetic conflict suite, **25 questions across 8 scenarios** (oracle ground-truth
-ingestion). Run the harness described in `docs/tasks/T1-benchmark-harness.md`:
-
-```bash
-python -m hydraclaim.benchmark data/sessions/*.json --arm all
-```
-
-| Arm | Overall accuracy | Knowledge-update accuracy | Abstention P/R | Mean queries/question | p95 latency |
-|---|---|---|---|---|---|
-| Naïve RAG (top word-overlap claim) | 0.240 | 1.000 | 0.000 / 0.000 | 0.9 | 3.7 ms |
-| Question Router | 0.760 | 1.000 | 1.000 / 0.500 | 4.8 | 71.3 ms |
-| Always Deep | 0.840 | 1.000 | 1.000 / 0.500 | 5.0 | 70.1 ms |
-| Router + Graph Probe | **1.000** | 1.000 | **1.000 / 1.000** | 4.7 | 71.1 ms |
-
-The naïve RAG baseline picks the single active claim with the most word overlap
-with the question. It cannot see supersession chains, cannot surface conflicts,
-and guesses on every abstention question — dropping to 24% accuracy. The graph
-probe gives HydraClaim precise, typed coverage: it abstains when no claim backs
-the question, escalates to deep retrieval when conflicts or overwrites exist,
-and answers cheaply only when the graph is clean.
-
-**Why HydraDB?** The typed edges (`SUPERSEDES`, `CONTRADICTS`, `ABOUT`) and
-property bitemporal filters are the reason the probe is cheap and exact. A
-flat chunk store would have to re-derive chronology, conflict, and coverage at
-query time; here they are materialized graph structure.
-
-**LongMemEval**: we piloted the oracle subset; HydraClaim's closed predicate
-vocabulary is tuned for structured project-memory claims and does not cleanly
-extract open-ended personal-dialogue facts with the local 8B model. We therefore
-report the scaled synthetic suite above as the primary ablation, which exercises
-the same five LongMemEval abilities (IE, multi-session, temporal, knowledge
-update, abstention) in the system's intended domain. To try the converter on the
-real data, download `longmemeval_oracle.json` from the
-[LongMemEval HuggingFace dataset](https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned)
-and run `python -m hydraclaim.longmemeval convert <file> --out data/longmemeval/scenarios`.
-
-End-to-end extraction from a local llama.cpp backend scores
-P=1.000 / R=1.000 / F1=1.000 on the deadline-drift scenario (see
-`python -m hydraclaim.evaluate`). Set `LLM_TIMEOUT` (default 600 s) for
-slow local backends; the extraction section of `scripts/demo.sh` runs this
-live when `LLM_API_KEY` is set.
-
-## Recording the demo video
-
-A rendered demo video is available at **`demo/hydraclaim-demo.mp4`** (~96 s, 1920×1080).
-It covers the same beats as the checklist below. Rebuild it reproducibly with:
-
-```bash
-bash demo/build-video.sh     # needs ffmpeg + Docker; set LLM_API_KEY for the
-                             # live extraction/evaluation section
-```
-
-The build script regenerates the title/benchmark cards (`demo/gen-cards.py`),
-captures the live `scripts/demo.sh` and benchmark output as UTF-8 text, renders
-the terminals with `demo/term-video.py`, and concatenates the sections.
-
-- [x] 0:00–0:20 — Problem: facts change; flat memory returns stale + conflicting chunks.
-- [x] 0:20–0:50 — Graph model: claims, evidence, SUPERSEDES/CONTRADICTS (show the graph).
-- [x] 0:50–1:50 — Live demo: run `scripts/demo.sh`.
-- [x] 1:50–2:30 — Benchmark table + ablation numbers (accuracy vs tokens/latency).
-- [x] 2:30–3:00 — Why HydraDB: typed edges, property-filtered bitemporal queries, bounded `SUPERSEDES*1..n` traversal, `algo.*paths`; what the project would lose without it.
-
-Keep the final video under 3 minutes and ensure it is legible without audio.
