@@ -73,29 +73,20 @@ a:hover { color: var(--cyan-strong); }
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 60px;
+  height: 56px;
 }
 .brand { display: flex; align-items: center; gap: 11px; cursor: pointer; }
-.brand-mark {
-  width: 44px; height: 44px;
+.brand-img {
+  width: 40px; height: 40px;
   border-radius: 8px;
-  overflow: hidden;
-  display: flex; align-items: center; justify-content: center;
+  object-fit: cover;
+  display: block;
   flex: 0 0 auto;
 }
 .brand-logo {
   width: 100%; height: 100%;
   object-fit: cover;
   display: block;
-}
-/* Console header brand mark (uses the favicon, larger at 2x) */
-.brand-img {
-  width: 44px; height: 44px;
-  border-radius: 8px;
-  object-fit: cover;
-  display: block;
-  flex: 0 0 auto;
-  margin-right: 2px;
 }
 .brand-name { font-size: 16.5px; font-weight: 600; letter-spacing: -0.01em; }
 .brand-accent { color: var(--amber); }
@@ -407,7 +398,8 @@ footer {
   padding: 0 20px;
   height: 56px;
   border-bottom: 1px solid var(--border);
-  background: var(--panel-2);
+  background: oklch(0.155 0.012 258 / 0.82);
+  backdrop-filter: blur(14px);
 }
 .topbar-nav { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; }
 .topbar-nav button {
