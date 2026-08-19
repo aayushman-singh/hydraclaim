@@ -72,6 +72,96 @@ def handle_scenarios() -> dict[str, Any]:
     return {"scenarios": scenarios}
 
 
+# Route hint per gold question type, used when the LLM is unavailable.
+_QTYPE_TO_ROUTE = {
+    "conflict": "CONFLICT",
+    "abstention": "ABSTAIN",
+    "temporal": "DEEP",
+    "knowledge_update": "DEEP",
+    "multi_session": "DEEP",
+    "lookup": "FAST",
+}
+
+_SUGGESTION_SYSTEM = """You suggest demo questions for a conflict-aware temporal memory
+system. You are given real ground-truth questions grouped by route:
+
+- FAST: clean single-fact lookups
+- DEEP: facts with overwrite history or an exact time in the past
+- CONFLICT: two sources disagree (an unresolved contradiction)
+- ABSTAIN: something the system has never recorded
+
+Pick exactly one question per route (4 total), choosing the clearest, most
+demo-friendly phrasing from each group. Expect route is a hint: pick the question
+that will trigger it. Prefer short questions with a clear answer.
+
+Respond with strict JSON only:
+{"suggestions": [{"text": "", "route": "FAST"}, {"text": "", "route": "DEEP"},
+                 {"text": "", "route": "CONFLICT"}, {"text": "", "route": "ABSTAIN"}]}"""
+
+
+def _build_suggestion_payload(scenarios: list[dict]) -> dict[str, list[dict]]:
+    """Group ground-truth questions by route bucket (deterministic baseline)."""
+    by_route: dict[str, list[str]] = {}
+    for doc in scenarios:
+        for qa in doc.get("ground_truth", {}).get("qa", []):
+            route = _QTYPE_TO_ROUTE.get(qa.get("qtype"), "DEEP")
+            by_route.setdefault(route, []).append(qa["question"])
+    return {
+        "suggestions": [
+            {"text": by_route[r][0], "route": r}
+            for r in ("FAST", "DEEP", "CONFLICT", "ABSTAIN")
+            if by_route.get(r)
+        ]
+    }
+
+
+def handle_suggestions(llm_fn) -> dict[str, Any]:
+    """Return 4 diverse demo questions (one per route), grounded in the data.
+
+    Uses the LLM to pick the clearest phrasing per route when available;
+    otherwise falls back to a deterministic selection.
+    """
+    scenarios = []
+    for path in sorted(DATA_DIR.glob("*.json")):
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        scenarios.append(doc)
+
+    baseline = _build_suggestion_payload(scenarios)
+    if llm_fn is None or not baseline["suggestions"]:
+        return baseline
+
+    from hydraclaim.llm import chat_json
+
+    bucket_text = "\n".join(
+        f"[{b['route']}] {b['text']}" for b in baseline["suggestions"]
+    )
+    try:
+        result = chat_json([
+            {"role": "system", "content": _SUGGESTION_SYSTEM},
+            {"role": "user", "content": "Ground-truth questions by route:\n" + bucket_text},
+        ])
+        suggestions = result.get("suggestions", []) if isinstance(result, dict) else []
+        if (
+            suggestions
+            and len(suggestions) >= 1
+            and all(isinstance(s, dict) and s.get("route") for s in suggestions)
+        ):
+            seen = set()
+            deduped = []
+            for s in suggestions:
+                key = s.get("route")
+                if key in seen:
+                    continue
+                seen.add(key)
+                deduped.append({"text": str(s.get("text", "")), "route": str(key)})
+            if deduped:
+                return {"suggestions": deduped}
+    except Exception as exc:
+        print(f"ERROR: suggestion generation failed — falling back to "
+              f"deterministic selection ({exc})", file=sys.stderr, flush=True)
+    return baseline
+
+
 def handle_graph(db) -> dict[str, Any]:
     """Compact graph for visualization: entities + claims + relation edges."""
     entities = db.query("MATCH (e:Entity) RETURN e.id AS id, e.name AS name, "
@@ -121,6 +211,8 @@ def dispatch(method: str, path: str, body: dict, db, llm_fn,
         return 200, {"status": "ok"}
     if method == "GET" and path == "/scenarios":
         return 200, handle_scenarios()
+    if method == "GET" and path == "/suggestions":
+        return 200, handle_suggestions(llm_fn)
     if method == "POST" and path == "/ask":
         question = (body.get("question") or "").strip()
         if not question:
