@@ -21,6 +21,7 @@ Try it live:
 
 - **App** — https://hydraclaim.aayushman.dev
 - **API** — https://hydraclaim-api.aayushman.dev (`/ask`, `/graph`, `/scenarios`, `/health`)
+- **Demo video** — https://youtu.be/qa5agsQvzfA
 
 The app is a static page wired to a live HydraDB graph pre-ingested with 16
 scenarios. Ask it about deadlines, owners, conflicts, or facts it has never
