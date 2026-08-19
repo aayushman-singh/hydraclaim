@@ -1,2 +1,2 @@
 // Backend URL for the live HydraClaim demo.
-window.TRUSTGRAPH_API = "https://hydraclaim.aayushman.dev";
+window.HYDRACLAIM_API = "https://hydraclaim-api.aayushman.dev";

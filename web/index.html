@@ -4,44 +4,249 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>HydraClaim — conflict-aware temporal agent memory</title>
-<link rel="stylesheet" href="style.css">
+<meta name="description" content="Temporal claim graph for AI agents. Tracks fact changes, resolves conflicts, abstains when uncertain. Built on HydraDB.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
-<header>
-  <div class="brand">
-    <h1>HydraClaim</h1>
-    <span class="tagline">conflict-aware temporal memory for agents</span>
-  </div>
-  <nav>
-    <span id="status-pill" class="pill pending">connecting…</span>
-    <a href="https://github.com/aayushman-singh/hydraclaim">GitHub</a>
-  </nav>
-</header>
 
-<main>
-  <section id="chat-panel">
-    <div id="samples" class="samples"></div>
-    <div id="chat" class="chat"></div>
-    <form id="ask-form">
-      <input id="question" type="text" autocomplete="off"
-             placeholder="Ask about deadlines, owners, status…" autofocus>
-      <button type="submit">Ask</button>
-    </form>
-  </section>
-
-  <section id="graph-panel">
-    <h2>Memory graph <span id="graph-meta"></span></h2>
-    <div id="graph"></div>
-    <div class="legend">
-      <span><i class="dot entity"></i> entity</span>
-      <span><i class="dot active"></i> active claim</span>
-      <span><i class="dot superseded"></i> superseded claim</span>
-      <span><i class="edge sup"></i> SUPERSEDES</span>
-      <span><i class="edge con"></i> CONTRADICTS</span>
+<!-- ─── Sticky nav ─── -->
+<nav class="topnav">
+  <div class="topnav-inner">
+    <a href="#" class="logo">Hydra<span>Claim</span></a>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#how-it-works">How it works</a>
+      <a href="#benchmarks">Benchmarks</a>
+      <a href="#demo">Demo</a>
+      <a href="https://github.com/aayushman-singh/hydraclaim" class="nav-gh" target="_blank">GitHub</a>
     </div>
-  </section>
-</main>
+  </div>
+</nav>
+
+<!-- ─── Hero ─── -->
+<section class="hero">
+  <div class="hero-inner">
+    <div class="hero-badge">Hack Hydra 2026 · Track 3</div>
+    <h1>Agent memory that knows<br>what changed — and when.</h1>
+    <p class="hero-sub">
+      Every fact is a <strong>claim</strong> with provenance and a validity window.
+      Overwrites and contradictions are first-class graph structure.
+      A graph-probe router answers cheaply, escalates conflicts, and abstains when the graph can't back an answer.
+    </p>
+    <div class="hero-actions">
+      <a href="#demo" class="btn btn-primary">Try the demo</a>
+      <a href="https://github.com/aayushman-singh/hydraclaim" class="btn btn-outline" target="_blank">View source</a>
+    </div>
+    <div class="hero-stats">
+      <div class="stat"><span class="stat-num">100%</span><span class="stat-label">accuracy (probe arm)</span></div>
+      <div class="stat"><span class="stat-num">25</span><span class="stat-label">benchmark questions</span></div>
+      <div class="stat"><span class="stat-num">8</span><span class="stat-label">conflict scenarios</span></div>
+      <div class="stat"><span class="stat-num">~71ms</span><span class="stat-label">p95 latency</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── Problem ─── -->
+<section class="section" id="problem">
+  <div class="container">
+    <div class="section-label">The problem</div>
+    <h2>Vector memory doesn't track truth.</h2>
+    <p class="section-desc">
+      When deadlines move, owners hand off, and status changes across Slack, Linear, and meetings — flat chunk stores retrieve stale text.
+      They can't tell you what's current, what was believed last week, or when to say "I don't know."
+    </p>
+    <div class="compare-grid">
+      <div class="compare-card bad">
+        <div class="compare-header">Flat vector RAG</div>
+        <ul>
+          <li>Retrieves stale chunks alongside current ones</li>
+          <li>Can't detect cross-source contradictions</li>
+          <li>Guesses on unanswerable questions</li>
+          <li>Re-derives state at read time — slow, fragile</li>
+        </ul>
+        <div class="compare-result">24% accuracy</div>
+      </div>
+      <div class="compare-card good">
+        <div class="compare-header">HydraClaim</div>
+        <ul>
+          <li>SUPERSEDES edges track every overwrite</li>
+          <li>CONTRADICTS edges flag unresolved conflicts</li>
+          <li>Typed-coverage abstention — exact, not threshold</li>
+          <li>Bitemporal queries — "what was true at T" is a filter</li>
+        </ul>
+        <div class="compare-result">100% accuracy</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── Features ─── -->
+<section class="section section-dark" id="features">
+  <div class="container">
+    <div class="section-label">Core capabilities</div>
+    <h2>Memory as a graph, not a haystack.</h2>
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon">⛓</div>
+        <h3>Supersession chains</h3>
+        <p>New facts create SUPERSEDES edges — history is never overwritten. Reconstruct any fact's full timeline with bounded path traversal.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">⚡</div>
+        <h3>Conflict detection</h3>
+        <p>When Slack says one thing and Linear says another, CONTRADICTS edges mark the disagreement. Trust scoring arbitrates.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🎯</div>
+        <h3>Typed abstention</h3>
+        <p>If no claim exists for the asked (subject, predicate), the system declines and reports what it searched. No guessing.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">⏱</div>
+        <h3>Bitemporal queries</h3>
+        <p>"What was believed as of last Tuesday?" is a property filter on valid_from/valid_to — a Cypher query, not inference.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🔀</div>
+        <h3>Graph-probe routing</h3>
+        <p>2–3 bounded Cypher queries measure coverage, conflicts, and chain depth. Clean → FAST. Messy → DEEP. Empty → ABSTAIN.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📎</div>
+        <h3>Cited answers</h3>
+        <p>Every answer traces back to verbatim quotes, authors, and sources. Provenance is structure, not prompt engineering.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── How it works ─── -->
+<section class="section" id="how-it-works">
+  <div class="container">
+    <div class="section-label">Architecture</div>
+    <h2>From messy events to cited answers.</h2>
+    <div class="pipeline">
+      <div class="pipe-step">
+        <div class="pipe-num">1</div>
+        <h3>Ingest</h3>
+        <p>Slack, Linear, meeting transcripts → LLM extractor pulls atomic claims with a closed predicate vocabulary (~12 types).</p>
+      </div>
+      <div class="pipe-arrow">→</div>
+      <div class="pipe-step">
+        <div class="pipe-num">2</div>
+        <h3>Reconcile</h3>
+        <p>Deterministic rules detect overwrites (SUPERSEDES) and conflicts (CONTRADICTS). Deduplication. No ambiguity.</p>
+      </div>
+      <div class="pipe-arrow">→</div>
+      <div class="pipe-step">
+        <div class="pipe-num">3</div>
+        <h3>Store</h3>
+        <p>Claims, evidence, entities, and typed edges land in HydraDB via batched UNWIND writes. Idempotent.</p>
+      </div>
+      <div class="pipe-arrow">→</div>
+      <div class="pipe-step">
+        <div class="pipe-num">4</div>
+        <h3>Query</h3>
+        <p>Classify → graph probe → route FAST / DEEP / ABSTAIN → cited answer with timeline and provenance.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── Benchmarks ─── -->
+<section class="section section-dark" id="benchmarks">
+  <div class="container">
+    <div class="section-label">Results</div>
+    <h2>Ablation on 25 questions, 8 scenarios.</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Arm</th>
+            <th>Accuracy</th>
+            <th>Knowledge update</th>
+            <th>Abstention P / R</th>
+            <th>Queries/q</th>
+            <th>p95 latency</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Naïve RAG</td><td>24.0%</td><td>100%</td><td>0% / 0%</td><td>0.9</td><td>6 ms</td>
+          </tr>
+          <tr>
+            <td>Question Router</td><td>76.0%</td><td>100%</td><td>100% / 50%</td><td>4.8</td><td>111 ms</td>
+          </tr>
+          <tr>
+            <td>Always Deep</td><td>84.0%</td><td>100%</td><td>100% / 50%</td><td>5.0</td><td>84 ms</td>
+          </tr>
+          <tr class="highlight-row">
+            <td>Router + Graph Probe</td><td><strong>100%</strong></td><td>100%</td><td><strong>100% / 100%</strong></td><td>4.7</td><td>71 ms</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="table-note">
+      The naïve RAG baseline picks the single active claim with the most word overlap. It cannot see supersession chains, cannot surface conflicts, and guesses on every abstention question. The graph probe gives HydraClaim precise, typed coverage.
+    </p>
+  </div>
+</section>
+
+<!-- ─── Interactive demo ─── -->
+<section class="section" id="demo">
+  <div class="container">
+    <div class="section-label">Try it</div>
+    <h2>Ask the memory graph.</h2>
+    <p class="section-desc">Connected to a live HydraDB instance with 8 pre-ingested scenarios. Ask about deadlines, owners, conflicts, or things that were never recorded.</p>
+
+    <div class="demo-layout">
+      <div class="demo-chat-col">
+        <div class="demo-status">
+          <span id="status-pill" class="pill pending">connecting…</span>
+        </div>
+        <div id="samples" class="samples"></div>
+        <div id="chat" class="chat"></div>
+        <form id="ask-form">
+          <input id="question" type="text" autocomplete="off"
+                 placeholder="Ask about deadlines, owners, status…">
+          <button type="submit">Ask</button>
+        </form>
+      </div>
+      <div class="demo-graph-col">
+        <div class="graph-header">
+          <span>Memory graph</span>
+          <span id="graph-meta" class="graph-meta"></span>
+        </div>
+        <div id="graph"></div>
+        <div class="legend">
+          <span><i class="dot entity"></i> entity</span>
+          <span><i class="dot active"></i> active claim</span>
+          <span><i class="dot superseded"></i> superseded</span>
+          <span><i class="edge sup"></i> SUPERSEDES</span>
+          <span><i class="edge con"></i> CONTRADICTS</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── Footer ─── -->
+<footer>
+  <div class="container footer-inner">
+    <div class="footer-brand">
+      <span class="logo">Hydra<span>Claim</span></span>
+      <span class="footer-tagline">Conflict-aware temporal memory for agents.</span>
+    </div>
+    <div class="footer-links">
+      <a href="https://github.com/aayushman-singh/hydraclaim" target="_blank">GitHub</a>
+      <a href="https://github.com/hydra-db/hydradb" target="_blank">HydraDB</a>
+      <span class="footer-license">MIT License</span>
+    </div>
+  </div>
+</footer>
 
 <script src="config.js"></script>
 <script src="app.js"></script>

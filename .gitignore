@@ -20,6 +20,10 @@ __pycache__/
 .pytest_cache/
 *.egg-info/
 
+# Secrets
+.env
+.env.*
+
 # OS / editor
 .DS_Store
 Thumbs.db

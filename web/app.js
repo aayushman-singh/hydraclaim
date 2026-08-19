@@ -1,4 +1,4 @@
-const API = window.TRUSTGRAPH_API;
+const API = window.HYDRACLAIM_API;
 
 const chatEl = document.getElementById("chat");
 const form = document.getElementById("ask-form");
@@ -19,7 +19,7 @@ async function checkHealth() {
     statusPill.textContent = "live";
     statusPill.className = "pill ok";
   } catch (e) {
-    statusPill.textContent = "backend unreachable";
+    statusPill.textContent = "backend offline";
     statusPill.className = "pill err";
   }
 }
@@ -28,12 +28,6 @@ async function loadSamples() {
   try {
     const r = await fetch(API + "/scenarios");
     const data = await r.json();
-    const picks = [];
-    for (const s of data.scenarios) {
-      for (const q of s.questions) picks.push(q);
-    }
-    // Keep the chip row compact: one representative question per scenario,
-    // preferring conflict/knowledge-update/temporal beats.
     const chosen = [];
     for (const s of data.scenarios) {
       const pref = s.questions.find((q) => !/originally|first set|start of/.test(q));
@@ -41,7 +35,7 @@ async function loadSamples() {
     }
     for (const q of chosen) {
       const b = document.createElement("button");
-      b.textContent = q.length > 52 ? q.slice(0, 52) + "…" : q;
+      b.textContent = q.length > 52 ? q.slice(0, 52) + "\u2026" : q;
       b.title = q;
       b.onclick = () => { input.value = q; form.requestSubmit(); };
       samplesEl.appendChild(b);
@@ -63,13 +57,13 @@ function renderAnswer(data) {
   let probe = "";
   if (data.probe) {
     const p = data.probe;
-    probe = `<div class="probe-row">probe: coverage ${p.coverage} · conflicts ${p.conflicts} · chain depth ${p.chain_depth}</div>`;
+    probe = `<div class="probe-row">coverage ${p.coverage} \u00b7 conflicts ${p.conflicts} \u00b7 chain depth ${p.chain_depth}</div>`;
   }
   let cites = "";
   if (data.citations && data.citations.length) {
     cites = '<div class="citations">' + data.citations.map((c) =>
       `<div class="cite"><span class="cite-key">[${esc(c.claim_id)}]</span> ` +
-      `${esc(c.source_kind)}/${esc(c.author)}: <span class="quote">"${esc(c.quote)}"</span></div>`
+      `${esc(c.source_kind)}/${esc(c.author)}: <span class="quote">\u201c${esc(c.quote)}\u201d</span></div>`
     ).join("") + "</div>";
   }
   return badge + probe + esc(data.answer) + cites;
@@ -81,7 +75,7 @@ form.addEventListener("submit", async (e) => {
   if (!q) return;
   input.value = "";
   addMsg("q", esc(q));
-  const pending = addMsg("a", '<span class="badge">…</span>');
+  const pending = addMsg("a", '<span class="badge">\u2026</span>');
   try {
     const r = await fetch(API + "/ask", {
       method: "POST",
@@ -109,23 +103,23 @@ async function loadGraph() {
     const data = await r.json();
     const nodes = new vis.DataSet(data.nodes.map((n) => {
       const isEntity = n.kind === "entity";
-      const color = isEntity ? "#64b4ff" : (n.status === "active" ? "#5cd68a" : "#7a7a85");
+      const color = isEntity ? "#60a5fa" : (n.status === "active" ? "#4ade80" : "#71717a");
       return {
         id: n.id,
-        label: isEntity ? n.label : (n.label.length > 34 ? n.label.slice(0, 34) + "…" : n.label),
+        label: isEntity ? n.label : (n.label.length > 34 ? n.label.slice(0, 34) + "\u2026" : n.label),
         title: isEntity ? `${n.label} (${n.type})` : `${n.key}\nstatus: ${n.status}`,
         color: { background: color, border: color },
         shape: isEntity ? "box" : "dot",
         size: isEntity ? 20 : 10,
-        font: { color: "#e8e8ec", size: isEntity ? 13 : 11, face: "Consolas, monospace" },
+        font: { color: "#ececf1", size: isEntity ? 13 : 11, face: "JetBrains Mono, Consolas, monospace" },
       };
     }));
     const edges = new vis.DataSet(data.edges.map((e) => {
       const style = {
-        SUPERSEDES: { color: "#e8b45c", dashes: true, arrows: "to" },
-        CONTRADICTS: { color: "#e86a6a", dashes: [2, 4], arrows: "to;from" },
-        ABOUT: { color: "#3a3c46", dashes: false, arrows: "" },
-      }[e.type] || { color: "#3a3c46", dashes: false, arrows: "" };
+        SUPERSEDES: { color: "#fbbf24", dashes: true, arrows: "to" },
+        CONTRADICTS: { color: "#f87171", dashes: [2, 4], arrows: "to;from" },
+        ABOUT: { color: "#23252e", dashes: false, arrows: "" },
+      }[e.type] || { color: "#23252e", dashes: false, arrows: "" };
       return { from: e.from, to: e.to, color: { color: style.color }, dashes: style.dashes, arrows: style.arrows, title: e.type };
     }));
     const container = document.getElementById("graph");
@@ -135,10 +129,10 @@ async function loadGraph() {
       nodes: { borderWidth: 1 },
     });
     document.getElementById("graph-meta").textContent =
-      `${data.nodes.length} nodes · ${data.edges.length} edges`;
+      `${data.nodes.length} nodes \u00b7 ${data.edges.length} edges`;
   } catch (e) {
     document.getElementById("graph").innerHTML =
-      '<p style="color:#7a7a85;padding:16px">graph unavailable: ' + esc(e.message) + "</p>";
+      '<p style="color:var(--muted);padding:16px;font-size:13px">graph unavailable: ' + esc(e.message) + "</p>";
   }
 }
 

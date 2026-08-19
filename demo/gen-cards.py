@@ -30,12 +30,12 @@ intro = make_card([
     "Local stack:",
     "  • LLM: llama.cpp  qwen3:8b  (CUDA)",
     "  • Graph: HydraDB via Docker",
-    "  • Code: github.com/aayushman-singh/trustgraph",
-], title="TrustGraph", font_size=36)
+    "  • Code: github.com/aayushman-singh/hydraclaim",
+], title="HydraClaim", font_size=36)
 intro.save(DEMO / "intro.png")
 
 # Schema card: first 38 lines of schema.cypher
-schema_text = (DEMO.parent / "trustgraph" / "schema.cypher").read_text()
+schema_text = (DEMO.parent / "hydraclaim" / "schema.cypher").read_text()
 schema_lines = schema_text.splitlines()[:38]
 schema = make_card(schema_lines, title="Graph model", font_size=22, title_size=44)
 schema.save(DEMO / "schema.png")
@@ -55,8 +55,8 @@ bench = make_card(bench_text.splitlines(), title="Ablation results", font_size=2
 bench.save(DEMO / "benchmark.png")
 
 outro = make_card([
-    "TrustGraph",
-    "github.com/aayushman-singh/trustgraph",
+    "HydraClaim",
+    "github.com/aayushman-singh/hydraclaim",
     "",
     "Built end-to-end with a local LLM on llama.cpp",
 ], title="Thanks", font_size=40, title_size=56)

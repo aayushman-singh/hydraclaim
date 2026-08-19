@@ -10,7 +10,7 @@ ffmpeg -y -f gdigrab -framerate 30 -i desktop \
 FFPID=$!
 
 # Open a maximized terminal and run the demo + benchmark.
-"/c/Windows/System32/cmd.exe" //c start //max cmd //c "C:\Repo\trustgraph\demo\run-demo-and-benchmark.bat"
+"/c/Windows/System32/cmd.exe" //c start //max cmd //c "C:\Repo\hydraclaim\demo\run-demo-and-benchmark.bat"
 
 # Wait until the batch signals completion.
 while [ ! -f demo/record-done.txt ]; do

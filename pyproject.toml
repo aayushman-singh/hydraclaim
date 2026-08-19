@@ -1,0 +1,39 @@
+[project]
+name = "hydraclaim"
+version = "0.1.0"
+description = "Conflict-aware temporal memory for AI agents, built on HydraDB."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [
+    { name = "Aayushman Singh", email = "aayushman@example.com" },
+]
+keywords = [
+    "agent-memory",
+    "knowledge-graph",
+    "temporal-memory",
+    "hydradb",
+    "conflict-resolution",
+    "bitemporal",
+    "rag",
+    "llm",
+    "graph-database",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "httpx>=0.27",
+]
+
+[project.urls]
+Homepage = "https://github.com/aayushman-singh/hydraclaim"
+Repository = "https://github.com/aayushman-singh/hydraclaim"
+Demo = "https://hydraclaim.vercel.app"
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]

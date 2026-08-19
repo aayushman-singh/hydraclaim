@@ -28,8 +28,8 @@ card_to_video outro.png     5  outro.mp4
 bash scripts/demo.sh > demo/demo-output.txt 2>&1
 # The demo only ingests 2 scenarios; the benchmark covers all 8, so ingest
 # the rest first (idempotent) before capturing the ablation table.
-python -m trustgraph.ingest data/sessions/*.json > /dev/null
-python -m trustgraph.benchmark data/sessions/*.json --arm all \
+python -m hydraclaim.ingest data/sessions/*.json > /dev/null
+python -m hydraclaim.benchmark data/sessions/*.json --arm all \
   > demo/bench-output.txt 2>&1
 
 # 4. Render the text captures as scrolling terminal clips.
@@ -50,9 +50,9 @@ printf '%s\n' \
   "file '$ROOT/demo/bench-terminal.mp4'" \
   "file '$ROOT/demo/outro.mp4'" > demo/concat.txt
 ffmpeg -y -f concat -safe 0 -i demo/concat.txt \
-  -c copy demo/trustgraph-demo.mp4 -loglevel error
+  -c copy demo/hydraclaim-demo.mp4 -loglevel error
 rm -f demo/concat.txt
 
 ffprobe -v error -show_entries format=duration \
-  -of default=noprint_wrappers=1:nokey=1 demo/trustgraph-demo.mp4
-echo "Wrote demo/trustgraph-demo.mp4"
+  -of default=noprint_wrappers=1:nokey=1 demo/hydraclaim-demo.mp4
+echo "Wrote demo/hydraclaim-demo.mp4"
