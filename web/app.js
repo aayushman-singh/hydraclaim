@@ -3,6 +3,7 @@ const API = window.HYDRACLAIM_API;
 const input = document.getElementById("question");
 const suggestionsEl = document.getElementById("suggestions");
 const resultEl = document.getElementById("result");
+const resultEmpty = document.getElementById("result-empty");
 const traceEl = document.getElementById("trace");
 const traceEmpty = document.getElementById("trace-empty");
 
@@ -12,10 +13,103 @@ function esc(s) {
   return d.innerHTML;
 }
 
-// ─── View switching (landing / console) ───
+// ─── Chat history (per-IP, stored in localStorage) ───
+let USER_KEY = "local";
+let chatStack = [];
+
+async function resolveUserKey() {
+  // Best-effort: derive a storage namespace from the user's public IP so each
+  // visitor sees their own history. Falls back to 'local' (all visitors share)
+  // if the geolocation service is unreachable.
+  try {
+    const r = await fetch("https://api.ipify.org?format=json", { signal: AbortSignal.timeout(4000) });
+    const d = await r.json();
+    if (d && d.ip) USER_KEY = String(d.ip);
+  } catch (e) { /* keep 'local' */ }
+  try {
+    chatStack = JSON.parse(localStorage.getItem("hydraclaim_chats_" + USER_KEY) || "[]");
+  } catch (e) { chatStack = []; }
+  renderChatHistory();
+  if (chatStack.length > 0) loadChatIntoView(chatStack[chatStack.length - 1]);
+}
+
+function saveChats() {
+  try {
+    // cap history at 100 entries to keep the key small
+    const capped = chatStack.slice(-100);
+    localStorage.setItem("hydraclaim_chats_" + USER_KEY, JSON.stringify(capped));
+    chatStack = capped;
+  } catch (e) { /* storage may be full/unavailable */ }
+  renderChatHistory();
+}
+
+function renderChatHistory() {
+  const list = document.getElementById("chat-history-list");
+  const empty = document.getElementById("chat-history-empty");
+  if (!list) return;
+  list.innerHTML = "";
+  if (empty) empty.style.display = chatStack.length ? "none" : "block";
+  chatStack.forEach((entry, i) => {
+    const item = document.createElement("div");
+    item.className = "chat-history-item";
+    item.title = "Click to reopen";
+    const when = entry.at ? new Date(entry.at).toLocaleString() : "";
+    item.innerHTML =
+      '<div class="chat-history-q">' + esc(entry.q || "") + "</div>" +
+      '<div class="chat-history-meta">' + esc(entry.route || "") + " · " + esc(when) + "</div>";
+    item.addEventListener("click", () => {
+      setActiveHistory(i);
+      loadChatIntoView(entry);
+      goView("ask");
+    });
+    list.appendChild(item);
+  });
+
+  // Ensure the "clear" control exists once.
+  if (chatStack.length && !document.getElementById("chat-clear-btn")) {
+    const clear = document.createElement("button");
+    clear.id = "chat-clear-btn";
+    clear.className = "chat-clear";
+    clear.textContent = "Clear history";
+    clear.addEventListener("click", () => {
+      chatStack = [];
+      saveChats();
+    });
+    list.after(clear);
+  } else if (!chatStack.length) {
+    const clear = document.getElementById("chat-clear-btn");
+    if (clear) clear.remove();
+  }
+}
+
+function setActiveHistory(index) {
+  const items = document.querySelectorAll(".chat-history-item");
+  items.forEach((el, i) => el.classList.toggle("active", i === index));
+}
+
+// Re-render a past Q&A pair back into the result + trace panels without
+// re-querying the API (we replay the saved answer).
+function loadChatIntoView(entry) {
+  resultEl.innerHTML = renderAnswer({
+    route: entry.route,
+    answer: entry.answer,
+    citations: entry.citations || [],
+  });
+  renderTrace({ route: entry.route, classification: entry.classification, probe: entry.probe });
+  activeResult = true;
+  if (resultEmpty) resultEmpty.style.display = "none";
+  document.getElementById("cost-queries").textContent = entry.queries || "—";
+  document.getElementById("cost-latency").textContent = entry.latency || "—";
+  if (input) {
+    input.value = "";
+    input.placeholder = entry.q || input.placeholder;
+  }
+}
+
 const landingEl = document.getElementById("landing");
 const appEl = document.getElementById("app");
 const views = ["dashboard", "ask", "graph", "ingest"];
+let activeResult = false;
 
 function setView(name) {
   views.forEach((v) => {
@@ -25,7 +119,13 @@ function setView(name) {
     if (nav) nav.classList.toggle("active", v === name);
   });
   if (name === "dashboard") loadDashboard();
-  if (name === "ask" && input) input.focus();
+  if (name === "ask" && input) {
+    if (!activeResult) {
+      if (resultEmpty) resultEmpty.style.display = "";
+      if (traceEmpty) traceEmpty.style.display = "";
+    }
+    input.focus();
+  }
 }
 window.setView = setView;
 
@@ -123,26 +223,24 @@ async function checkHealth() {
   }
 }
 
-// ─── Suggestions from live scenarios ───
+// ─── Suggestions: one per route, kept to 4 ───
+const CURATED_SUGGESTIONS = [
+  { text: "What is the current launch deadline?", route: "DEEP" },
+  { text: "Where is Casey Brooks located now?", route: "FAST" },
+  { text: "What is Casey Brooks phone number?", route: "ABSTAIN" },
+  { text: "Who owns the payments integration?", route: "CONFLICT" },
+];
+
 async function loadSuggestions() {
-  try {
-    const r = await fetch(API + "/scenarios", { signal: AbortSignal.timeout(8000) });
-    if (!r.ok) return;
-    const data = await r.json();
-    const chosen = [];
-    for (const s of data.scenarios || []) {
-      const pref = s.questions.find((q) => !/originally|first set|start of/.test(q));
-      chosen.push(pref || (s.questions || [])[0]);
-    }
-    for (const q of chosen) {
-      if (!q) continue;
-      const b = document.createElement("button");
-      b.textContent = q.length > 52 ? q.slice(0, 52) + "\u2026" : q;
-      b.title = q;
-      b.onclick = () => { input.value = q; runAsk(); };
-      suggestionsEl.appendChild(b);
-    }
-  } catch (e) { /* chips are optional */ }
+  suggestionsEl.innerHTML = "";
+  CURATED_SUGGESTIONS.forEach((s) => {
+    const b = document.createElement("button");
+    b.className = "chip-route";
+    b.textContent = s.text;
+    b.title = s.text;
+    b.onclick = () => { input.value = s.text; runAsk(); };
+    suggestionsEl.appendChild(b);
+  });
 }
 
 // ─── Verdict pill styling ───
@@ -248,6 +346,14 @@ window.toggleTrace = function (i) {
   caret.style.transform = open ? "" : "rotate(180deg)";
 };
 
+// Clickable citations: expand the detail card and find its parent .cite.
+window.toggleCite = function (i) {
+  const det = document.getElementById("cite-detail-" + i);
+  if (!det) return;
+  const cite = det.closest(".cite");
+  if (cite) cite.classList.toggle("open");
+};
+
 // ─── Render answer block ───
 function renderAnswer(data) {
   const route = data.route || "";
@@ -258,21 +364,29 @@ function renderAnswer(data) {
 
   let citations = "";
   if (data.citations && data.citations.length) {
-    const list = data.citations.map((c) => {
+    const list = data.citations.map((c, idx) => {
       const cid = esc(c.claim_id != null ? c.claim_id : "");
       const kind = esc(c.source_kind || "");
       const author = esc(c.author != null ? "/" + c.author : "");
       const quote = esc(c.quote || "");
+      const val = esc(c.value != null ? c.value : "");
       const at = esc(c.valid_from != null ? c.valid_from.slice(0, 10) : "");
+      const vto = esc(c.valid_to ? c.valid_to.slice(0, 10) : "active");
       const warn = /conflict/i.test(route) ? " warn" : "";
       return (
-        '<div class="cite' + warn + '">' +
+        '<div class="cite' + warn + '" onclick="toggleCite(' + idx + ')">' +
           '<div class="cite-head">' +
             '<span class="cite-tag">' + cid + "</span>" +
             '<span class="cite-source">' + kind + author + "</span>" +
             '<span class="cite-at">' + at + "</span>" +
+            '<span class="cite-caret">▾</span>' +
           "</div>" +
           '<div class="cite-quote">\u201c' + quote + "\u201d</div>" +
+          '<div class="cite-detail" id="cite-detail-' + idx + '">' +
+            '<div class="cd-item"><span class="cd-key">value</span><span>' + val + "</span></div>" +
+            '<div class="cd-item"><span class="cd-key">valid</span><span>' + at + " → " + vto + "</span></div>" +
+            '<div class="cd-item"><span class="cd-key">claim</span><span>' + cid + "</span></div>" +
+          "</div>" +
         "</div>"
       );
     }).join("");
@@ -301,6 +415,7 @@ async function runAsk() {
       '<span class="spinner" style="width:14px;height:14px;border:2px solid var(--border-strong);' +
       'border-top-color:var(--cyan);border-radius:99px;display:inline-block;animation:spin .8s linear infinite;"></span>' +
       "Asking…</div>";
+  if (resultEmpty) resultEmpty.style.display = "none";
   traceEl.innerHTML = "";
   traceEmpty.style.display = "none";
 
@@ -327,6 +442,23 @@ async function runAsk() {
     }
     resultEl.innerHTML = renderAnswer(data);
     renderTrace(data);
+    activeResult = true;
+    if (resultEmpty) resultEmpty.style.display = "none";
+
+    // Persist to this visitor's chat history (keyed by IP).
+    chatStack.push({
+      q,
+      answer: data.answer || "",
+      route: data.route || "",
+      citations: data.citations || [],
+      classification: data.classification || {},
+      probe: data.probe || {},
+      queries: ((data.probe ? (1 + (data.probe.conflicts > 0 ? 2 : 0)) : 1)),
+      latency: (ms >= 1000 ? (ms / 1000).toFixed(1) + " s" : ms + " ms"),
+      at: new Date().toISOString(),
+    });
+    saveChats();
+    setActiveHistory(chatStack.length - 1);
   } catch (err) {
     document.getElementById("cost-queries").textContent = "—";
     document.getElementById("cost-latency").textContent = "—";
@@ -380,10 +512,23 @@ async function loadGraph() {
 
     const container = document.getElementById("graph");
     network = new vis.Network(container, { nodes, edges }, {
-      physics: { barnesHut: { gravitationalConstant: -2600, springLength: 130 } },
-      interaction: { hover: true },
+      physics: {
+        enabled: true,
+        barnesHut: { gravitationalConstant: -2600, springLength: 130,
+                     springConstant: 0.04, damping: 0.08 },
+        stabilization: { enabled: true, iterations: 400, updateInterval: 40,
+                         fit: true },
+      },
+      interaction: { hover: true, tooltipDelay: 120 },
       nodes: { borderWidth: 1 },
+      layout: { randomSeed: 42 },
     });
+    // Center and zoom to the whole graph once it has settled, so it isn't
+    // left zoomed in on a single node.
+    network.on("stabilizationIterationsDone", () => {
+      network.fit({ animation: true });
+    });
+    window.__hydraclaimNetwork = network;
     GRAPH_META.textContent =
       (data.nodes || []).length + " nodes \u00b7 " + (data.edges || []).length + " edges";
   } catch (e) {
@@ -393,6 +538,22 @@ async function loadGraph() {
     GRAPH_META.textContent = "unavailable";
   }
 }
+
+window.fitGraph = function () {
+  const net = window.__hydraclaimNetwork;
+  if (net) net.fit({ animation: true, duration: 400 });
+};
+
+window.resetGraph = function () {
+  const net = window.__hydraclaimNetwork;
+  if (!net) return;
+  net.setOptions({ physics: { enabled: true } });
+  net.once("stabilizationIterationsDone", () => {
+    net.fit({ animation: true, duration: 400 });
+    net.setOptions({ physics: { enabled: false } });
+  });
+  net.startSimulation();
+};
 
 // ─── Ingest ───
 const ingestTabs = document.querySelectorAll(".ingest-tab");
@@ -543,4 +704,5 @@ if (savedKey) document.getElementById("ingest-key").value = savedKey;
 checkHealth();
 loadSuggestions();
 loadGraph();
+resolveUserKey();
 setInterval(checkHealth, 30000);

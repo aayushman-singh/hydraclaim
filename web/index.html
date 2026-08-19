@@ -39,7 +39,7 @@
         <div class="brand-mark">
           <img class="brand-logo" src="brand-logo.png" alt="HydraClaim logo">
         </div>
-        <span class="brand-name">HydraClaim</span>
+        <span class="brand-name">Hydra<span class="brand-accent">Claim</span></span>
       </div>
       <div class="nav-links">
         <a href="#how">How it works</a>
@@ -52,7 +52,6 @@
 
   <section class="hero">
     <div class="hero-inner">
-      <div class="hero-badge">Temporal memory layer · built on HydraDB</div>
       <h1>Agent memory that knows<br><em>when it shouldn't answer.</em></h1>
       <p class="hero-sub">
         Every fact is a claim with provenance and a validity window.
@@ -155,11 +154,17 @@
     <div class="footer-inner">
       <div class="footer-brand">
         <img class="footer-logo" src="brand-logo.png" alt="HydraClaim logo">
-        Graph storage by HydraDB
+        <span>HydraClaim</span>
+      </div>
+      <div class="footer-attrib">
+        <img class="hydradb-mark" src="hydradb-mark.png" alt="HydraDB logo">
+        <span>
+          Built on <a href="https://github.com/hydra-db/hydradb" target="_blank" rel="noopener">HydraDB</a>
+        </span>
       </div>
       <div class="footer-links">
-        <a href="https://github.com/aayushman-singh/hydraclaim" target="_blank">GitHub</a>
-        <a href="https://github.com/hydra-db/hydradb" target="_blank">HydraDB</a>
+        <a href="https://github.com/aayushman-singh/hydraclaim" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/hydra-db/hydradb" target="_blank" rel="noopener">HydraDB</a>
         <span class="footer-license">MIT licensed</span>
       </div>
     </div>
@@ -172,8 +177,8 @@
 
   <div class="topbar">
     <div class="brand" onclick="goLanding()">
-      <div class="brand-mark"></div>
-      <span class="brand-name">HydraClaim</span>
+      <img class="brand-img" src="brand-logo.png" alt="HydraClaim">
+      <span class="brand-name">Hydra<span class="brand-accent">Claim</span></span>
     </div>
     <nav class="topbar-nav">
       <button id="nav-dashboard" class="active" onclick="goView('dashboard')">Dashboard</button>
@@ -238,6 +243,11 @@
 
     <!-- Ask view -->
     <div id="view-ask" class="ask-layout">
+      <aside class="chat-history hcScroll">
+        <div class="chat-history-title">Chat history</div>
+        <div id="chat-history-list" class="chat-history-list"></div>
+        <div id="chat-history-empty" class="chat-history-empty">No chats yet.</div>
+      </aside>
       <div class="ask-main hcScroll">
         <div class="ask-inner">
           <div class="ask-box">
@@ -248,12 +258,21 @@
           <div id="suggestions" class="suggestions"></div>
 
           <div id="result" class="result"></div>
+          <div id="result-empty" class="trace-empty" style="margin-top:30px;">
+            <div class="trace-empty-icon">💬</div>
+            <div class="trace-empty-title">Ask the memory graph</div>
+            <div class="trace-empty-sub">Try one of the suggestions above, or type any question about deadlines, owners, or conflicts.</div>
+          </div>
         </div>
       </div>
       <div class="trace-panel hcScroll">
         <div class="trace-title">ROUTER TRACE</div>
         <div id="trace" class="trace-list"></div>
-        <div id="trace-empty" class="empty-state">Ask a question to see how it was routed, probed, and answered.</div>
+        <div id="trace-empty" class="trace-empty">
+          <div class="trace-empty-icon">?</div>
+          <div class="trace-empty-title">No route yet</div>
+          <div class="trace-empty-sub">Ask a question above and this panel will show how it was classified, probed, and answered.</div>
+        </div>
 
         <div style="margin-top:30px;padding-top:26px;border-top:1px solid var(--border);">
           <div class="cost-title">COST</div>
@@ -274,10 +293,10 @@
 
     <!-- Graph view -->
     <div id="view-graph" class="graph-view" style="display:none;">
-      <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:24px;margin-bottom:26px;flex-wrap:wrap;">
+      <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:24px;margin-bottom:14px;flex-wrap:wrap;">
         <div>
-          <h1 style="margin:0 0 7px;font-size:27px;font-weight:500;letter-spacing:-0.022em;">Claim graph</h1>
-          <p style="margin:0;font-size:14px;color:var(--fg-2);">Live HydraDB graph — entities, claims, and the edges between them.</p>
+          <h1 style="margin:0 0 4px;font-size:24px;font-weight:500;letter-spacing:-0.02em;">Claim graph</h1>
+          <p style="margin:0;font-size:13.5px;color:var(--fg-2);">Live HydraDB graph — entities, claims, and the typed edges between them.</p>
         </div>
         <span id="graph-meta" class="graph-meta">connecting…</span>
       </div>
@@ -285,14 +304,24 @@
         <div class="graph-card-head">
           <span class="step-label">LIVE GRAPH</span>
         </div>
-        <div id="graph" class="graph-canvas"></div>
-      </div>
-      <div class="legend">
-        <span><i class="dot entity"></i> entity</span>
-        <span><i class="dot active"></i> active claim</span>
-        <span><i class="dot superseded"></i> superseded</span>
-        <span><i class="edge sup"></i> SUPERSEDES</span>
-        <span><i class="edge con"></i> CONTRADICTS</span>
+        <div id="graph-widget" class="graph-widget">
+          <div id="graph" class="graph-canvas"></div>
+          <div class="graph-minimap"><canvas id="minimap" width="180" height="120"></canvas></div>
+          <div class="graph-controls">
+            <div class="graph-legend">
+              <div class="graph-legend-title">LEGEND</div>
+              <div class="legend-row"><i class="dot entity"></i> entity</div>
+              <div class="legend-row"><i class="dot active"></i> active claim</div>
+              <div class="legend-row"><i class="dot superseded"></i> superseded</div>
+              <div class="legend-row"><i class="edge sup"></i> SUPERSEDES</div>
+              <div class="legend-row"><i class="edge con"></i> CONTRADICTS</div>
+              <div class="legend-row"><i class="edge about"></i> ABOUT</div>
+            </div>
+            <div class="graph-tools">
+              <button onclick="fitGraph()">Fit</button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -360,8 +389,8 @@
           </div>
 
           <div class="ingest-auth" style="margin-top:14px;">
-            <label>Write key <span class="auth-hint">(required if server has HYDRACLAIM_WRITE_KEY set)</span>
-              <input id="ingest-key" type="password" placeholder="Bearer token">
+            <label>Admin access key <span class="auth-hint">(optional — only required if the server protects writes)</span>
+              <input id="ingest-key" type="password" placeholder="Leave blank for this demo">
             </label>
           </div>
 
