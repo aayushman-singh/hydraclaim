@@ -40,28 +40,28 @@ def _stub_answer(monkeypatch):
 
 
 def test_dispatch_health():
-    status, payload = serve.dispatch("GET", "/health", {}, None, None)
+    status, payload, _ = serve.dispatch("GET", "/health", {}, None, None)
     assert status == 200
     assert payload == {"status": "ok"}
 
 
 def test_dispatch_unknown_endpoint():
-    status, payload = serve.dispatch("GET", "/nope", {}, None, None)
+    status, payload, _ = serve.dispatch("GET", "/nope", {}, None, None)
     assert status == 404
     assert "unknown endpoint" in payload["error"]
 
 
 def test_dispatch_ask_requires_question():
-    status, payload = serve.dispatch("POST", "/ask", {}, None, None)
+    status, payload, _ = serve.dispatch("POST", "/ask", {}, None, None)
     assert status == 400
-    status, payload = serve.dispatch("POST", "/ask", {"question": "  "}, None, None)
+    status, payload, _ = serve.dispatch("POST", "/ask", {"question": "  "}, None, None)
     assert status == 400
 
 
 def test_dispatch_ask_returns_answer():
-    status, payload = serve.dispatch("POST", "/ask",
-                                     {"question": "What is the current launch deadline?"},
-                                     FakeDB(), None)
+    status, payload, _ = serve.dispatch("POST", "/ask",
+                                        {"question": "What is the current launch deadline?"},
+                                        FakeDB(), None)
     assert status == 200
     assert payload["route"] == "FAST"
     assert payload["citations"][0]["claim_id"] == "c1"

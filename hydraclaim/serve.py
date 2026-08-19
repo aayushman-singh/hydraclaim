@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from hydraclaim import retrieve
+from hydraclaim.ratelimit import limiter
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "sessions"
 
@@ -204,70 +205,105 @@ def _check_write_auth(headers: dict) -> tuple[int, dict] | None:
 
 
 def dispatch(method: str, path: str, body: dict, db, llm_fn,
-             headers: dict | None = None) -> tuple[int, dict]:
-    """Route a request to a handler. Separated from HTTP for offline tests."""
+             headers: dict | None = None,
+             remote_addr: str | None = None) -> tuple[int, dict, dict | None]:
+    """Route a request to a handler. Returns (status, payload, extra_headers).
+
+    `extra_headers` is None in the common case and only carries things like
+    `Retry-After` on a rate-limited response.
+    """
     headers = headers or {}
+
+    def _rate_limit(name: str) -> tuple[int, dict, dict] | None:
+        """Return a 429 response if the client exceeded `name`, else None."""
+        client = limiter.client_key(headers.get("x-forwarded-for", ""),
+                                    remote_addr or "")
+        allowed, retry_after = limiter.hit(client, name)
+        if not allowed:
+            print(f"WARN: rate limit '{name}' hit for {client}; "
+                  f"blocking until ~{retry_after}s", file=sys.stderr, flush=True)
+            return (429, {"error": f"rate limit exceeded for {name}. "
+                                   f"Try again in about {retry_after}s."},
+                    {"Retry-After": str(retry_after)})
+        return None
+
     if method == "GET" and path == "/health":
-        return 200, {"status": "ok"}
+        return 200, {"status": "ok"}, None
     if method == "GET" and path == "/scenarios":
-        return 200, handle_scenarios()
+        return 200, handle_scenarios(), None
     if method == "GET" and path == "/suggestions":
-        return 200, handle_suggestions(llm_fn)
+        blocked = _rate_limit("suggestions")
+        if blocked:
+            return blocked
+        return 200, handle_suggestions(llm_fn), None
     if method == "POST" and path == "/ask":
         question = (body.get("question") or "").strip()
         if not question:
-            return 400, {"error": "missing 'question' in request body"}
+            return 400, {"error": "missing 'question' in request body"}, None
+        if len(question) > 300:
+            return 400, {"error": "question too long (max 300 chars)"}, None
+        blocked = _rate_limit("ask")
+        if blocked:
+            return blocked
         from hydraclaim.db import HydraDBError
         try:
-            return 200, handle_ask(question, db, llm_fn)
+            return 200, handle_ask(question, db, llm_fn), None
         except HydraDBError as exc:
-            return 502, {"error": f"graph backend failed: {exc}"}
+            return 502, {"error": f"graph backend failed: {exc}"}, None
     if method == "GET" and path == "/graph":
         from hydraclaim.db import HydraDBError
         try:
-            return 200, handle_graph(db)
+            return 200, handle_graph(db), None
         except HydraDBError as exc:
-            return 502, {"error": f"graph backend failed: {exc}"}
-    if method == "POST" and path == "/ingest":
+            return 502, {"error": f"graph backend failed: {exc}"}, None
+    if method in ("POST",) and path in ("/ingest", "/ingest/slack"):
         auth_err = _check_write_auth(headers)
         if auth_err:
-            return auth_err
-        from hydraclaim.ingest_api import handle_ingest
-        return handle_ingest(body, db)
-    if method == "POST" and path == "/ingest/slack":
-        auth_err = _check_write_auth(headers)
-        if auth_err:
-            return auth_err
+            return auth_err[0], auth_err[1], None
+        blocked = _rate_limit("ingest")
+        if blocked:
+            return blocked
+        if method == "POST" and path == "/ingest":
+            from hydraclaim.ingest_api import handle_ingest
+            status, payload = handle_ingest(body, db)
+            return status, payload, None
         from hydraclaim.ingest_api import handle_ingest_slack
-        return handle_ingest_slack(body, db)
-    return 404, {"error": f"unknown endpoint: {method} {path}"}
+        status, payload = handle_ingest_slack(body, db)
+        return status, payload, None
+    return 404, {"error": f"unknown endpoint: {method} {path}"}, None
 
 
 class DemoHandler(BaseHTTPRequestHandler):
     """HTTP plumbing around dispatch()."""
 
-    def _respond(self, status: int, payload: dict) -> None:
+    def _respond(self, status: int, payload: dict, extra: dict | None) -> None:
         body = json.dumps(payload).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Access-Control-Allow-Origin", "*")
+        for k, v in (extra or {}).items():
+            self.send_header(k, v)
         self.end_headers()
         self.wfile.write(body)
 
-    def _dispatch(self) -> tuple[int, dict]:
+    def _dispatch(self) -> tuple[int, dict, dict | None]:
         llm_fn = self.server.llm_fn  # type: ignore[attr-defined]
         try:
             if self.command == "POST":
                 length = int(self.headers.get("Content-Length") or 0)
+                if length > 500_000:  # hard cap on request bodies
+                    return 413, {"error": "request body too large"}, None
                 body = json.loads(self.rfile.read(length) or b"{}")
             else:
                 body = {}
             path = self.path.split("?", 1)[0].rstrip("/") or "/"
             hdrs = {k.lower(): v for k, v in self.headers.items()}
-            return dispatch(self.command, path, body, self.server.db, llm_fn, hdrs)  # type: ignore[attr-defined]
+            remote_addr = self.client_address[0] if self.client_address else None
+            return dispatch(self.command, path, body, self.server.db, llm_fn,
+                            hdrs, remote_addr)  # type: ignore[attr-defined]
         except json.JSONDecodeError:
-            return 400, {"error": "request body must be JSON"}
+            return 400, {"error": "request body must be JSON"}, None
 
     def do_GET(self) -> None:
         self._respond(*self._dispatch())

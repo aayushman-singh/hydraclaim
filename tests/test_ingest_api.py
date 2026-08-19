@@ -35,7 +35,7 @@ def test_write_auth_accepts_correct_key(monkeypatch):
 
 def test_ingest_route_requires_auth(monkeypatch):
     monkeypatch.setattr(serve, "WRITE_KEY", "mykey")
-    status, payload = serve.dispatch("POST", "/ingest", {"text": "hi"}, None, None, {})
+    status, payload, extra = serve.dispatch("POST", "/ingest", {"text": "hi"}, None, None, {})
     assert status == 401
 
 
@@ -43,7 +43,7 @@ def test_ingest_route_passes_auth(monkeypatch):
     """With correct key, dispatch reaches the handler (which will fail on LLM, not auth)."""
     monkeypatch.setattr(serve, "WRITE_KEY", "mykey")
     monkeypatch.delenv("LLM_API_KEY", raising=False)
-    status, payload = serve.dispatch(
+    status, payload, extra = serve.dispatch(
         "POST", "/ingest", {"text": "hello"},
         None, None, {"authorization": "Bearer mykey"}
     )
@@ -53,14 +53,14 @@ def test_ingest_route_passes_auth(monkeypatch):
 
 def test_ingest_slack_route_requires_auth(monkeypatch):
     monkeypatch.setattr(serve, "WRITE_KEY", "mykey")
-    status, _ = serve.dispatch("POST", "/ingest/slack", {}, None, None, {})
+    status, _, extra = serve.dispatch("POST", "/ingest/slack", {}, None, None, {})
     assert status == 401
 
 
 def test_ingest_missing_text_returns_400(monkeypatch):
     monkeypatch.setattr(serve, "WRITE_KEY", "")
     monkeypatch.setenv("LLM_API_KEY", "fake")
-    status, payload = serve.dispatch("POST", "/ingest", {}, None, None)
+    status, payload, extra = serve.dispatch("POST", "/ingest", {}, None, None)
     assert status == 400
     assert "text" in payload["error"]
 
@@ -68,7 +68,7 @@ def test_ingest_missing_text_returns_400(monkeypatch):
 def test_ingest_invalid_source_kind(monkeypatch):
     monkeypatch.setattr(serve, "WRITE_KEY", "")
     monkeypatch.setenv("LLM_API_KEY", "fake")
-    status, payload = serve.dispatch(
+    status, payload, extra = serve.dispatch(
         "POST", "/ingest",
         {"text": "hi", "source_kind": "twitter"},
         None, None,
