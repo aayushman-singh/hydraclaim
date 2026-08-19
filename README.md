@@ -8,8 +8,8 @@ window, contradictions and overwrites are first-class graph structure, and a
 graph-probe router answers cheaply, escalates conflicted questions, and —
 crucially — abstains when the graph can't back an answer.
 
-> Built for [Hack Hydra 2026](https://hackhydra.com), Track 3 — Memory and
-> context retrieval.
+> Built for [Hack Hydra 2026](https://hackhydra.com):
+> **Track 3 — Memory and context retrieval** and **Track 1 — Enterprise Context + Ontology**.
 
 [![MIT license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)

@@ -77,13 +77,16 @@ a:hover { color: var(--cyan-strong); }
 }
 .brand { display: flex; align-items: center; gap: 11px; cursor: pointer; }
 .brand-mark {
-  width: 22px; height: 22px; border-radius: 6px;
-  border: 1.5px solid var(--cyan);
-  background: var(--cyan-dim);
+  width: 28px; height: 28px;
+  border-radius: 6px;
+  overflow: hidden;
   display: flex; align-items: center; justify-content: center;
+  flex: 0 0 auto;
 }
-.brand-mark::after {
-  content: ""; width: 7px; height: 7px; border-radius: 99px; background: var(--cyan);
+.brand-logo {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  display: block;
 }
 .brand-name { font-size: 16.5px; font-weight: 600; letter-spacing: -0.01em; }
 .nav-links { display: flex; align-items: center; gap: 30px; }
@@ -373,7 +376,7 @@ footer {
 }
 .footer-inner { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
 .footer-brand { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--fg-3); }
-.footer-mark { width: 15px; height: 15px; border-radius: 4px; border: 1.5px solid oklch(0.50 0.05 202); }
+.footer-logo { width: 18px; height: 18px; border-radius: 4px; object-fit: cover; }
 .footer-links { display: flex; align-items: center; gap: 20px; }
 .footer-links a { color: var(--fg-2); font-size: 13px; }
 .footer-links a:hover { color: var(--fg); }
