@@ -1,4 +1,4 @@
-"""Read-only demo web server for HydraClaim.
+"""HydraClaim web server with read and write paths.
 
     python -m hydraclaim.serve --port 8000
 
@@ -8,6 +8,8 @@ Endpoints:
   GET  /graph                 -> entity/claim nodes + edges for the graph view
   POST /ask {"question": str} -> retrieve.answer() result (route, answer,
                                  citations, classification, probe)
+  POST /ingest                -> LLM extract + reconcile + write (needs LLM_API_KEY)
+  POST /ingest/slack          -> Slack export -> sessions -> ingest pipeline
 
 Stdlib HTTP only — no new runtime dependencies. Question classification uses
 the LLM when LLM_API_KEY is set (any OpenAI-compatible endpoint via
@@ -21,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -97,8 +100,23 @@ RETURN c.id AS id, c.key AS key, e.name AS subject, c.predicate AS predicate,
     return {"nodes": nodes, "edges": edges}
 
 
-def dispatch(method: str, path: str, body: dict, db, llm_fn) -> tuple[int, dict]:
+WRITE_KEY = os.environ.get("HYDRACLAIM_WRITE_KEY", "")
+
+
+def _check_write_auth(headers: dict) -> tuple[int, dict] | None:
+    """Return an error tuple if write auth fails, None if OK."""
+    if not WRITE_KEY:
+        return None
+    auth = headers.get("authorization", "")
+    if auth == f"Bearer {WRITE_KEY}":
+        return None
+    return 401, {"error": "invalid or missing write key"}
+
+
+def dispatch(method: str, path: str, body: dict, db, llm_fn,
+             headers: dict | None = None) -> tuple[int, dict]:
     """Route a request to a handler. Separated from HTTP for offline tests."""
+    headers = headers or {}
     if method == "GET" and path == "/health":
         return 200, {"status": "ok"}
     if method == "GET" and path == "/scenarios":
@@ -118,6 +136,18 @@ def dispatch(method: str, path: str, body: dict, db, llm_fn) -> tuple[int, dict]
             return 200, handle_graph(db)
         except HydraDBError as exc:
             return 502, {"error": f"graph backend failed: {exc}"}
+    if method == "POST" and path == "/ingest":
+        auth_err = _check_write_auth(headers)
+        if auth_err:
+            return auth_err
+        from hydraclaim.ingest_api import handle_ingest
+        return handle_ingest(body, db)
+    if method == "POST" and path == "/ingest/slack":
+        auth_err = _check_write_auth(headers)
+        if auth_err:
+            return auth_err
+        from hydraclaim.ingest_api import handle_ingest_slack
+        return handle_ingest_slack(body, db)
     return 404, {"error": f"unknown endpoint: {method} {path}"}
 
 
@@ -142,7 +172,8 @@ class DemoHandler(BaseHTTPRequestHandler):
             else:
                 body = {}
             path = self.path.split("?", 1)[0].rstrip("/") or "/"
-            return dispatch(self.command, path, body, self.server.db, llm_fn)  # type: ignore[attr-defined]
+            hdrs = {k.lower(): v for k, v in self.headers.items()}
+            return dispatch(self.command, path, body, self.server.db, llm_fn, hdrs)  # type: ignore[attr-defined]
         except json.JSONDecodeError:
             return 400, {"error": "request body must be JSON"}
 
@@ -156,7 +187,7 @@ class DemoHandler(BaseHTTPRequestHandler):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
         self.end_headers()
 
     def log_message(self, fmt: str, *args: Any) -> None:
@@ -172,7 +203,6 @@ def main() -> None:
                              "(requires LLM_API_KEY); default is the keyword heuristic")
     args = parser.parse_args()
 
-    import os
     from hydraclaim.config import connect
 
     llm_fn = llm_classifier if args.llm and os.environ.get("LLM_API_KEY") else None

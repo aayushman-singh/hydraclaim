@@ -21,6 +21,7 @@
       <a href="#how-it-works">How it works</a>
       <a href="#benchmarks">Benchmarks</a>
       <a href="#demo">Demo</a>
+      <a href="#ingest">Ingest</a>
       <a href="https://github.com/aayushman-singh/hydraclaim" class="nav-gh" target="_blank">GitHub</a>
     </div>
   </div>
@@ -228,6 +229,86 @@
           <span><i class="edge sup"></i> SUPERSEDES</span>
           <span><i class="edge con"></i> CONTRADICTS</span>
         </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── Ingest ─── -->
+<section class="section section-dark" id="ingest">
+  <div class="container">
+    <div class="section-label">Ingest</div>
+    <h2>Feed it your own data.</h2>
+    <p class="section-desc">Drop a Slack export, meeting notes, or raw text. HydraClaim extracts claims, detects overwrites and conflicts, and writes them into the graph.</p>
+
+    <div class="ingest-layout">
+      <div class="ingest-form">
+        <div class="ingest-tabs">
+          <button class="ingest-tab active" data-tab="text">Raw text</button>
+          <button class="ingest-tab" data-tab="file">File upload</button>
+          <button class="ingest-tab" data-tab="slack">Slack export</button>
+        </div>
+
+        <!-- Raw text tab -->
+        <div class="tab-panel active" id="tab-text">
+          <textarea id="ingest-text" rows="6" placeholder="Paste meeting notes, Slack messages, or any text containing facts about people, projects, deadlines..."></textarea>
+          <div class="ingest-fields">
+            <label>Source
+              <select id="ingest-source">
+                <option value="meeting">Meeting</option>
+                <option value="slack" selected>Slack</option>
+                <option value="linear">Linear</option>
+              </select>
+            </label>
+            <label>Author
+              <input id="ingest-author" type="text" placeholder="optional">
+            </label>
+            <label>Channel
+              <input id="ingest-channel" type="text" placeholder="optional">
+            </label>
+          </div>
+        </div>
+
+        <!-- File upload tab -->
+        <div class="tab-panel" id="tab-file">
+          <div class="drop-zone" id="drop-zone">
+            <div class="drop-zone-text">
+              <span class="drop-icon">+</span>
+              <span>Drop a <strong>.json</strong> or <strong>.txt</strong> file here</span>
+              <span class="drop-sub">or click to browse</span>
+            </div>
+            <input type="file" id="file-input" accept=".json,.txt" hidden>
+          </div>
+          <div id="file-name" class="file-name"></div>
+        </div>
+
+        <!-- Slack export tab -->
+        <div class="tab-panel" id="tab-slack">
+          <div class="drop-zone" id="drop-zone-slack">
+            <div class="drop-zone-text">
+              <span class="drop-icon">+</span>
+              <span>Drop a Slack channel export <strong>.json</strong></span>
+              <span class="drop-sub">Array of messages from a Slack export</span>
+            </div>
+            <input type="file" id="slack-file-input" accept=".json" hidden>
+          </div>
+          <div class="ingest-fields">
+            <label>Channel name
+              <input id="slack-channel" type="text" placeholder="general">
+            </label>
+          </div>
+          <div id="slack-file-name" class="file-name"></div>
+        </div>
+
+        <!-- Auth key -->
+        <div class="ingest-auth">
+          <label>Write key <span class="auth-hint">(required if server has HYDRACLAIM_WRITE_KEY set)</span>
+            <input id="ingest-key" type="password" placeholder="Bearer token">
+          </label>
+        </div>
+
+        <button id="ingest-submit" class="btn btn-primary ingest-btn">Ingest</button>
+        <div id="ingest-result" class="ingest-result"></div>
       </div>
     </div>
   </div>

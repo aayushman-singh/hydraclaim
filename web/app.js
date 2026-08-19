@@ -136,6 +136,153 @@ async function loadGraph() {
   }
 }
 
+// ─── Ingest section ───
+
+const ingestTabs = document.querySelectorAll(".ingest-tab");
+const tabPanels = document.querySelectorAll(".tab-panel");
+let activeTab = "text";
+let uploadedFile = null;
+let slackFile = null;
+
+ingestTabs.forEach((tab) => {
+  tab.addEventListener("click", () => {
+    ingestTabs.forEach((t) => t.classList.remove("active"));
+    tabPanels.forEach((p) => p.classList.remove("active"));
+    tab.classList.add("active");
+    activeTab = tab.dataset.tab;
+    document.getElementById("tab-" + activeTab).classList.add("active");
+  });
+});
+
+function setupDropZone(zoneId, fileInputId, nameId, onFile) {
+  const zone = document.getElementById(zoneId);
+  const fileInput = document.getElementById(fileInputId);
+  if (!zone || !fileInput) return;
+  zone.addEventListener("click", () => fileInput.click());
+  zone.addEventListener("dragover", (e) => { e.preventDefault(); zone.classList.add("dragover"); });
+  zone.addEventListener("dragleave", () => zone.classList.remove("dragover"));
+  zone.addEventListener("drop", (e) => {
+    e.preventDefault();
+    zone.classList.remove("dragover");
+    if (e.dataTransfer.files.length) onFile(e.dataTransfer.files[0], nameId);
+  });
+  fileInput.addEventListener("change", () => {
+    if (fileInput.files.length) onFile(fileInput.files[0], nameId);
+  });
+}
+
+setupDropZone("drop-zone", "file-input", "file-name", (file, nameId) => {
+  uploadedFile = file;
+  document.getElementById(nameId).textContent = file.name;
+});
+setupDropZone("drop-zone-slack", "slack-file-input", "slack-file-name", (file, nameId) => {
+  slackFile = file;
+  document.getElementById(nameId).textContent = file.name;
+});
+
+function getWriteKey() {
+  const key = document.getElementById("ingest-key").value.trim();
+  if (key) localStorage.setItem("hydraclaim_write_key", key);
+  return key || localStorage.getItem("hydraclaim_write_key") || "";
+}
+
+function showIngestResult(ok, text) {
+  const el = document.getElementById("ingest-result");
+  el.textContent = text;
+  el.className = "ingest-result show " + (ok ? "ok" : "err");
+}
+
+async function readFileText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsText(file);
+  });
+}
+
+document.getElementById("ingest-submit").addEventListener("click", async () => {
+  const btn = document.getElementById("ingest-submit");
+  btn.disabled = true;
+  btn.textContent = "Ingesting\u2026";
+  const key = getWriteKey();
+  const headers = { "Content-Type": "application/json" };
+  if (key) headers["Authorization"] = "Bearer " + key;
+
+  try {
+    let endpoint, body;
+
+    if (activeTab === "text") {
+      const text = document.getElementById("ingest-text").value.trim();
+      if (!text) { showIngestResult(false, "no text provided"); return; }
+      endpoint = "/ingest";
+      body = {
+        text: text,
+        source_kind: document.getElementById("ingest-source").value,
+        author: document.getElementById("ingest-author").value.trim() || "unknown",
+        channel: document.getElementById("ingest-channel").value.trim() || "adhoc",
+      };
+    } else if (activeTab === "file") {
+      if (!uploadedFile) { showIngestResult(false, "no file selected"); return; }
+      const content = await readFileText(uploadedFile);
+      endpoint = "/ingest";
+      if (uploadedFile.name.endsWith(".json")) {
+        const parsed = JSON.parse(content);
+        if (parsed.sessions) {
+          body = parsed;
+        } else {
+          body = { text: content, source_kind: "meeting", author: "unknown" };
+        }
+      } else {
+        body = { text: content, source_kind: "meeting", author: "unknown" };
+      }
+    } else if (activeTab === "slack") {
+      if (!slackFile) { showIngestResult(false, "no Slack export file selected"); return; }
+      const content = await readFileText(slackFile);
+      const parsed = JSON.parse(content);
+      endpoint = "/ingest/slack";
+      body = {
+        channel: document.getElementById("slack-channel").value.trim() || "general",
+        messages: Array.isArray(parsed) ? parsed : (parsed.messages || []),
+      };
+    }
+
+    const resp = await fetch(API + endpoint, {
+      method: "POST",
+      headers: headers,
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      showIngestResult(false, data.error || "HTTP " + resp.status);
+    } else {
+      const lines = [
+        "Ingestion complete:",
+        `  created: ${data.created || 0}`,
+        `  superseded: ${data.superseded || 0}`,
+        `  contradicted: ${data.contradicted || 0}`,
+        `  duplicates: ${data.duplicates || 0}`,
+      ];
+      if (data.sessions_processed) lines.push(`  sessions: ${data.sessions_processed}`);
+      if (data.warnings && data.warnings.length) {
+        lines.push("", "warnings:", ...data.warnings.map((w) => "  " + w));
+      }
+      showIngestResult(true, lines.join("\n"));
+      loadGraph();
+    }
+  } catch (err) {
+    showIngestResult(false, "error: " + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Ingest";
+  }
+});
+
+// Restore saved write key
+const savedKey = localStorage.getItem("hydraclaim_write_key");
+if (savedKey) document.getElementById("ingest-key").value = savedKey;
+
+// ─── Init ───
 checkHealth();
 loadSamples();
 loadGraph();

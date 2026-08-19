@@ -490,6 +490,132 @@ td:first-child { font-family: var(--sans); font-size: 14px; color: var(--fg); }
 .edge.sup { border-color: var(--amber); }
 .edge.con { border-color: var(--red); }
 
+/* ─── Ingest section ─── */
+.ingest-layout { max-width: 640px; }
+.ingest-form { display: flex; flex-direction: column; gap: 16px; }
+.ingest-tabs { display: flex; gap: 4px; }
+.ingest-tab {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  cursor: pointer;
+  transition: all 0.15s;
+  border-bottom: none;
+}
+.ingest-tab.active { color: var(--fg); background: var(--bg); border-color: var(--accent); }
+.ingest-tab:hover:not(.active) { color: var(--fg-secondary); }
+
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+.ingest-form textarea {
+  width: 100%;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--fg);
+  padding: 12px;
+  font-family: var(--mono);
+  font-size: 13px;
+  resize: vertical;
+  outline: none;
+  line-height: 1.5;
+}
+.ingest-form textarea:focus { border-color: var(--accent); }
+
+.ingest-fields {
+  display: flex;
+  gap: 12px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+.ingest-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+  flex: 1;
+  min-width: 120px;
+}
+.ingest-fields select,
+.ingest-fields input {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg);
+  padding: 8px 10px;
+  font-size: 13px;
+  outline: none;
+}
+.ingest-fields select:focus,
+.ingest-fields input:focus { border-color: var(--accent); }
+
+.drop-zone {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 40px 24px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.drop-zone:hover, .drop-zone.dragover {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+.drop-zone-text { display: flex; flex-direction: column; gap: 6px; align-items: center; }
+.drop-icon { font-size: 28px; color: var(--muted); }
+.drop-zone-text span { font-size: 13px; color: var(--fg-secondary); }
+.drop-sub { font-size: 11px; color: var(--muted); }
+.file-name {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--accent);
+  margin-top: 8px;
+}
+
+.ingest-auth {
+  margin-top: 4px;
+}
+.ingest-auth label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.auth-hint { font-size: 11px; color: var(--muted); }
+.ingest-auth input {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg);
+  padding: 8px 10px;
+  font-size: 13px;
+  outline: none;
+  max-width: 320px;
+}
+.ingest-auth input:focus { border-color: var(--accent); }
+
+.ingest-btn { align-self: flex-start; margin-top: 4px; }
+
+.ingest-result {
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  display: none;
+}
+.ingest-result.show { display: block; }
+.ingest-result.ok { background: var(--green-dim); color: var(--green); }
+.ingest-result.err { background: var(--red-dim); color: var(--red); }
+
 /* ─── Footer ─── */
 footer {
   border-top: 1px solid var(--border);
