@@ -564,49 +564,55 @@ function setupMinimap(network) {
   function render() {
     try {
       ctx.clearRect(0, 0, MW, MH);
-      const positions = network.getPositions(); // {id: {x, y}} in canvas coords
-      const ids = Object.keys(positions);
-      if (!ids.length) return;
+      // Iterate the node objects directly — each carries its own canvas coords
+      // (x, y) and color, so no fragile id->object resolution is needed.
+      const all = network.body.data.nodes.get(); // array of node objects
+      if (!all || !all.length) return;
 
-      // Full graph bounds (canvas coordinate space).
       let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-      ids.forEach((id) => {
-        const p = positions[id];
-        if (!p) return;
-        if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
-        if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
+      all.forEach((n) => {
+        if (n.x === undefined) return;
+        if (n.x < minX) minX = n.x; if (n.x > maxX) maxX = n.x;
+        if (n.y < minY) minY = n.y; if (n.y > maxY) maxY = n.y;
       });
+      if (minX === Infinity) return;
       const gw = (maxX - minX) || 1;
       const gh = (maxY - minY) || 1;
 
-      // Fit the full graph into the minimap with a small inset.
-      const pad = 6;
+      // Fit the full graph into the minimap with an inset.
+      const pad = 10;
       const scale = Math.min((MW - pad * 2) / gw, (MH - pad * 2) / gh);
       const offX = (MW - gw * scale) / 2;
       const offY = (MH - gh * scale) / 2;
       const map = (px, py) => [offX + (px - minX) * scale, offY + (py - minY) * scale];
 
-      // Draw node points.
-      const nodeSet = network.body.data.nodes; // DataSet
-      ids.forEach((id) => {
-        const p = positions[id];
-        if (!p) return;
-        const n = nodeSet.get(id);
-        if (!n) return; // id present in positions but not resolvable — skip
-        const [mx, my] = map(p.x, p.y);
-        drawNodeGlyph(mx, my, 1.6, nodeColor(n));
+      // Draw node dots (brighter + slightly larger so they read clearly).
+      all.forEach((n) => {
+        if (n.x === undefined) return;
+        const [mx, my] = map(n.x, n.y);
+        drawNodeGlyph(mx, my, 2.2, nodeColor(n));
       });
 
-      // Draw the current viewport (visible canvas region).
+      // Draw the current viewport as a rectangle showing the user's POV on the
+      // whole canvas. It shrinks as you zoom in. A faint fill makes the region
+      // obvious against the node dots.
       const vw = network.getWidth();
       const vh = network.getHeight();
       const tl = network.DOMtoCanvas({ x: 0, y: 0 });
       const br = network.DOMtoCanvas({ x: vw, y: vh });
       const [vx1, vy1] = map(tl.x, tl.y);
       const [vx2, vy2] = map(br.x, br.y);
-      ctx.strokeStyle = "rgba(139, 92, 246, 0.9)";
+      const rx = Math.min(vx1, vx2);
+      const ry = Math.min(vy1, vy2);
+      const rw = Math.max(6, Math.abs(vx2 - vx1));
+      const rh = Math.max(6, Math.abs(vy2 - vy1));
+      ctx.save();
+      ctx.fillStyle = "rgba(139, 92, 246, 0.12)";
+      ctx.fillRect(rx, ry, rw, rh);
+      ctx.strokeStyle = "rgba(139, 92, 246, 0.95)";
       ctx.lineWidth = 1.5;
-      ctx.strokeRect(vx1, vy1, Math.max(6, vx2 - vx1), Math.max(6, vy2 - vy1));
+      ctx.strokeRect(rx, ry, rw, rh);
+      ctx.restore();
     } catch (err) {
       // The minimap is decorative; never let an overlay glitch take down the
       // whole graph on a camera-draw event.
