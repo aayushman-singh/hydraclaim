@@ -12,8 +12,8 @@ Build plan: [PLAN.md](PLAN.md).
 ## Live demo
 
 - **App**: https://hydraclaim.vercel.app
-- **API**: https://trustgraph.169.58.64.150.sslip.io  (`/ask`, `/graph`, `/scenarios`, `/health`)
-- **Source**: https://github.com/aayushman-singh/trustgraph
+- **API**: https://hydraclaim.aayushman.dev  (`/ask`, `/graph`, `/scenarios`, `/health`)
+- **Source**: https://github.com/aayushman-singh/hydraclaim
 
 The app is a static frontend on Vercel talking to a read-only backend on a
 Contabo VM (`hydraclaim.serve`, stdlib HTTP). The backend runs HydraDB
