@@ -126,7 +126,25 @@ function setView(name) {
     }
     input.focus();
   }
+  if (name === "graph") refreshGraphView();
 }
+
+// The graph is built while its tab is hidden (display:none), so vis-network has
+// no measurable container and lays out at 0x0. Whenever the graph tab becomes
+// visible we refit and re-render the minimap once the container has real size.
+window.refreshGraphView = function () {
+  const net = window.__hydraclaimNetwork;
+  if (!net) return;
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      try {
+        net.fit({ animation: false });
+        net.redraw();
+        if (window.__minimapRender) window.__minimapRender();
+      } catch (e) { /* ignore */ }
+    });
+  });
+};
 window.setView = setView;
 
 window.goView = function (name) {
@@ -496,6 +514,9 @@ async function loadGraph() {
                 face: "JetBrains Mono, Consolas, monospace" },
       };
     }));
+    // Color lookup keyed by the string id, matching how getPositions() keys.
+    const colorById = {};
+    (data.nodes || []).forEach((n) => { colorById[String(n.id)] = n.kind === "entity" ? "oklch(0.82 0.12 202)" : (n.status === "active" ? "oklch(0.78 0.15 148)" : "oklch(0.52 0.03 258)"); });
 
     const edges = new vis.DataSet((data.edges || []).map((e) => {
       const style = {
@@ -529,7 +550,7 @@ async function loadGraph() {
       network.fit({ animation: true });
     });
     window.__hydraclaimNetwork = network;
-    setupMinimap(network);
+    setupMinimap(network, colorById);
     GRAPH_META.textContent =
       (data.nodes || []).length + " nodes \u00b7 " + (data.edges || []).length + " edges";
   } catch (e) {
@@ -542,7 +563,7 @@ async function loadGraph() {
 
 // Custom minimap: draws all node positions plus the current viewport rectangle
 // onto the small overlay canvas so zoomed-in users know where they are.
-function setupMinimap(network) {
+function setupMinimap(network, colorById) {
   const canvas = document.getElementById("minimap");
   if (!canvas) return;
   const ctx = canvas.getContext("2d");
@@ -556,24 +577,24 @@ function setupMinimap(network) {
     ctx.fill();
   }
 
-  function nodeColor(n) {
-    if (n && n.color && n.color.background) return n.color.background;
-    return "#8b5cf6";
+  function nodeColor(id) {
+    return (colorById && colorById[String(id)]) || "#8b5cf6";
   }
 
   function render() {
     try {
       ctx.clearRect(0, 0, MW, MH);
-      // Iterate the node objects directly — each carries its own canvas coords
-      // (x, y) and color, so no fragile id->object resolution is needed.
-      const all = network.body.data.nodes.get(); // array of node objects
-      if (!all || !all.length) return;
+      const positions = network.getPositions() || {}; // {id: {x, y}} in canvas coords
+      const ids = Object.keys(positions);
+      if (!ids.length) return;
 
+      // Full graph bounds (canvas coordinate space).
       let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-      all.forEach((n) => {
-        if (n.x === undefined) return;
-        if (n.x < minX) minX = n.x; if (n.x > maxX) maxX = n.x;
-        if (n.y < minY) minY = n.y; if (n.y > maxY) maxY = n.y;
+      ids.forEach((id) => {
+        const p = positions[id];
+        if (!p) return;
+        if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
+        if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
       });
       if (minX === Infinity) return;
       const gw = (maxX - minX) || 1;
@@ -586,30 +607,32 @@ function setupMinimap(network) {
       const offY = (MH - gh * scale) / 2;
       const map = (px, py) => [offX + (px - minX) * scale, offY + (py - minY) * scale];
 
-      // Draw node dots (brighter + slightly larger so they read clearly).
-      all.forEach((n) => {
-        if (n.x === undefined) return;
-        const [mx, my] = map(n.x, n.y);
-        drawNodeGlyph(mx, my, 2.2, nodeColor(n));
+      // Draw node dots (color from the string-keyed map).
+      ids.forEach((id) => {
+        const p = positions[id];
+        if (!p) return;
+        const [mx, my] = map(p.x, p.y);
+        drawNodeGlyph(mx, my, 2.2, nodeColor(id));
       });
 
-      // Draw the current viewport as a rectangle showing the user's POV on the
-      // whole canvas. It shrinks as you zoom in. A faint fill makes the region
-      // obvious against the node dots.
-      const vw = network.getWidth();
-      const vh = network.getHeight();
-      const tl = network.DOMtoCanvas({ x: 0, y: 0 });
-      const br = network.DOMtoCanvas({ x: vw, y: vh });
+      // Draw the current viewport: visible region derived from the camera's
+      // center and scale (documented vis-network API — reliable across zooms).
+      const vp = network.getViewPosition(); // {x, y} canvas coords of view center
+      const netScale = network.getScale();
+      const vwHalf = network.getWidth() / (netScale * 2);
+      const vhHalf = network.getHeight() / (netScale * 2);
+      const tl = { x: vp.x - vwHalf, y: vp.y - vhHalf };
+      const br = { x: vp.x + vwHalf, y: vp.y + vhHalf };
       const [vx1, vy1] = map(tl.x, tl.y);
       const [vx2, vy2] = map(br.x, br.y);
       const rx = Math.min(vx1, vx2);
       const ry = Math.min(vy1, vy2);
-      const rw = Math.max(6, Math.abs(vx2 - vx1));
-      const rh = Math.max(6, Math.abs(vy2 - vy1));
+      const rw = Math.max(4, Math.abs(vx2 - vx1));
+      const rh = Math.max(4, Math.abs(vy2 - vy1));
       ctx.save();
-      ctx.fillStyle = "rgba(139, 92, 246, 0.12)";
+      ctx.fillStyle = "rgba(255, 255, 255, 0.18)";
       ctx.fillRect(rx, ry, rw, rh);
-      ctx.strokeStyle = "rgba(139, 92, 246, 0.95)";
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.95)";
       ctx.lineWidth = 1.5;
       ctx.strokeRect(rx, ry, rw, rh);
       ctx.restore();
@@ -624,6 +647,9 @@ function setupMinimap(network) {
   network.on("afterDrawing", render);
   network.on("stabilizationIterationsDone", render);
   network.on("resize", render);
+  network.on("dragEnd", render);
+  network.on("zoom", render);
+  window.__minimapRender = render;
   render();
 }
 

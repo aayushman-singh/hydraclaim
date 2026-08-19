@@ -1,0 +1,23 @@
+{
+  "channel": "launch",
+  "messages": [
+    {
+      "user": "U0PRIYA",
+      "user_profile": { "real_name": "Priya Shah" },
+      "ts": "1746405000.000100",
+      "text": "Ownership: I'll own the Q3 launch sprint end to end."
+    },
+    {
+      "user": "U0DARI",
+      "user_profile": { "real_name": "Dario Kim" },
+      "ts": "1746415800.000200",
+      "text": "Heads up — taking over the launch sprint from Priya as of today."
+    },
+    {
+      "user": "U0MEG",
+      "user_profile": { "real_name": "Meg Torres" },
+      "ts": "1746491400.000300",
+      "text": "Planning sync: the launch budget was approved at 90k, not 80k."
+    }
+  ]
+}

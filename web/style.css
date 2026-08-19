@@ -1080,6 +1080,15 @@ footer {
 .ingest-result.ok { background: oklch(0.78 0.15 148 / 0.10); color: var(--green); border: 1px solid oklch(0.78 0.15 148 / 0.3); }
 .ingest-result.err { background: var(--amber-dim); color: var(--amber); border: 1px solid oklch(0.80 0.13 78 / 0.4); }
 
+.ingest-samples {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--fg-3);
+}
+.ingest-samples a { color: var(--cyan); }
+
 /* ═══════ Responsive ═══════ */
 @media (max-width: 1080px) {
   .ask-layout { grid-template-columns: 200px minmax(0, 1fr) 360px; }
