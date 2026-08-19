@@ -11,16 +11,16 @@ Build plan: [PLAN.md](PLAN.md).
 
 ## Live demo
 
-- **App**: https://hydraclaim.vercel.app
-- **API**: https://hydraclaim.aayushman.dev  (`/ask`, `/graph`, `/scenarios`, `/health`)
+- **App**: https://hydraclaim.aayushman.dev  (fallback: https://hydraclaim.vercel.app)
+- **API**: https://hydraclaim-api.aayushman.dev  (`/ask`, `/graph`, `/scenarios`, `/health`)
 - **Source**: https://github.com/aayushman-singh/hydraclaim
 
-The app is a static frontend on Vercel talking to a read-only backend on a
-Contabo VM (`hydraclaim.serve`, stdlib HTTP). The backend runs HydraDB
-(Docker, bound to localhost), pre-ingested with the 8 benchmark scenarios,
-and uses DeepSeek (`deepseek-chat`) for question classification. The graph
-data and pre-ingested scenarios are fixed; any question is answered live
-against HydraDB with DeepSeek classification.
+The app is a static frontend served by Caddy on a Contabo VM, talking to a
+read-only backend (`hydraclaim.serve`, stdlib HTTP) on the API subdomain.
+The backend runs HydraDB (Docker, bound to localhost), pre-ingested with the
+8 benchmark scenarios, and uses DeepSeek (`deepseek-chat`) for question
+classification. The graph data and pre-ingested scenarios are fixed; any
+question is answered live against HydraDB with DeepSeek classification.
 
 ## Quickstart
 
