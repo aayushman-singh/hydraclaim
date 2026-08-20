@@ -11,6 +11,8 @@ fi
 
 docker compose up -d
 
+echo "local write key: local-development-write-key"
+
 echo -n "waiting for HydraDB readiness"
 for i in $(seq 1 60); do
   if curl -sf http://127.0.0.1:9090/readyz >/dev/null 2>&1; then

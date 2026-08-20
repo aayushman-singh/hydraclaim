@@ -26,6 +26,7 @@ Install the release package before you run the local workflow:
 
 ```bash
 pip install hydraclaim
+export HYDRACLAIM_WRITE_KEY="local-development-write-key"
 hydraclaim generate
 hydraclaim ingest data/sessions/deadline_drift.json
 hydraclaim ask "What is the current launch deadline?" --verbose

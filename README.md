@@ -30,7 +30,7 @@ recorded.
 ## Features
 
 - **Supersession chains** — overwrites are typed `SUPERSEDES` edges; history is
-  never destroyed, and any fact's full timeline is a bounded graph traversal.
+  never destroyed, and any fact's full timeline uses iterative one-hop reads.
 - **Conflict detection** — `CONTRADICTS` edges mark unresolved disagreements;
   predicate-specific trust scoring arbitrates instead of silently averaging.
 - **Typed abstention** — if no claim covers the asked `(subject, predicate)`, the
@@ -50,11 +50,13 @@ HydraDB is the system of record for agent memory, not a cache:
   `SUPERSEDES` (overwrite history), `CONTRADICTS` (unresolved conflicts),
   `ABOUT`, `SUPPORTED_BY`, `FROM` (provenance to source and evidence).
 - **Property predicates** implement bitemporal reads: *"what was believed
-  as of T"* is a `recorded_at <= T AND (valid_to IS NULL OR valid_to > T)`
-  filter, not an inference over retrieved chunks.
-- **Bounded variable-length paths** (`SUPERSEDES*1..5`) reconstruct the
-  chronology of an overwritten fact for timeline answers.
-- **Batched `UNWIND` writes** land extracted claims, evidence, and edges.
+  as of T"* is a `recorded_at <= T AND (valid_to = '' OR valid_to > T)`
+  filter, not an inference over retrieved chunks. An empty string means that
+  the validity window remains open.
+- **Bounded iterative reads** follow one `SUPERSEDES` edge per query and stop
+  at the configured claim-read limit.
+- **Idempotent individual writes** inspect and complete each claim, evidence,
+  source, and edge. The writer does not use batched `UNWIND` writes.
 
 Without HydraDB, conflict detection, time-travel queries, and
 typed-coverage abstention would all require ad-hoc scans over a document
@@ -71,6 +73,9 @@ pip install hydraclaim
 
 # 1. Start a local HydraDB node (HTTP on 8443, Bolt on 7687)
 bash scripts/dev-up.sh
+
+# Write routes require this explicit local development key.
+export HYDRACLAIM_WRITE_KEY="local-development-write-key"
 
 # 2. Verify HydraDB supports every Cypher feature this project needs
 hydraclaim schema --verify
@@ -128,9 +133,9 @@ python -m pytest tests/
 ```
 
 > **Note:** this is a hackathon prototype that doubles as a benchmark harness,
-> not a production library. The API exposes write endpoints (`/ingest`,
-> `/ingest/slack`) intended for the demo flow; secure it behind a write key
-> before deploying outside a hackathon.
+> not a production library. The API write endpoints (`/ingest`,
+> `/ingest/slack`) require `HYDRACLAIM_WRITE_KEY`. Set a strong deployment key
+> before use outside local development. A missing key fails closed.
 
 ## Architecture
 
@@ -147,7 +152,7 @@ python -m pytest tests/
   │ Reconciler   │──  contradict / dedup rules
   └──────┬───────┘
          ▼
-  ┌─────────────┐    batched UNWIND writes
+  ┌─────────────┐    idempotent individual writes
   │  HydraDB    │──  (claims, evidence, edges)
   └──────┬───────┘
          ▼
@@ -225,7 +230,7 @@ is LLM-only; every query-path answer is deterministic.
 | `hydraclaim/db.py` | HydraDB client (HTTP JSON query API) |
 | `hydraclaim/claims.py` | Closed predicate vocabulary + ground-truth validation |
 | `hydraclaim/generate/` | Deterministic synthetic session generator |
-| `hydraclaim/ingest.py` | Writes scenarios into HydraDB (idempotent, batched `UNWIND`) |
+| `hydraclaim/ingest.py` | Writes scenarios into HydraDB (idempotent individual writes) |
 | `hydraclaim/extract.py` | LLM claim extraction (grounded quotes, overwrite linking) |
 | `hydraclaim/reconcile.py` | Deterministic supersede / contradict / dedup rules |
 | `hydraclaim/evaluate.py` | Claim-level precision / recall vs. ground truth |
