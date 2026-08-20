@@ -17,13 +17,13 @@ jobs:
         python-version: ["3.11", "3.12", "3.13"]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: ${{ matrix.python-version }}
-      - run: python -m pip install -e . pytest ruff build twine
+      - run: python -m pip install -e ".[dev]" ruff build twine
       - run: ruff check .
       - run: ruff format --check .
       - run: python -m pytest tests/ -v -m "not artifact"
@@ -31,3 +31,13 @@ jobs:
       - run: python -m build
       - run: python -m twine check dist/*
       - run: python -m pytest tests/ -v -m artifact
+      - name: Linux clean-wheel acceptance
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          if command -v pwsh >/dev/null 2>&1; then
+            pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/verify-package.ps1
+          else
+            echo "pwsh is required for Linux clean-wheel acceptance."
+            exit 1
+          fi

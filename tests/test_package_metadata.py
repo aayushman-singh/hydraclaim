@@ -5,18 +5,25 @@ import zipfile
 
 import hydraclaim
 import pytest
+import yaml
 
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_ci_workflow_uses_current_actions_and_read_only_checkout() -> None:
-    text = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-
-    assert "permissions:\n  contents: read" in text
-    assert "uses: actions/checkout@v7" in text
-    assert "persist-credentials: false" in text
-    assert "uses: actions/setup-python@v7" in text
+    workflow = yaml.safe_load(
+        (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    )
+    assert workflow["permissions"] == {"contents": "read"}
+    steps = workflow["jobs"]["test"]["steps"]
+    assert steps[0]["uses"] == (
+        "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+    )
+    assert steps[0]["with"]["persist-credentials"] is False
+    assert steps[1]["uses"] == (
+        "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97"
+    )
 
 
 def test_project_metadata_is_complete() -> None:
@@ -63,11 +70,22 @@ def test_package_verifier_selects_only_the_release_wheel() -> None:
     assert "$actualArtifactNames" in text
     assert "$wheelPath" in text
     assert "$sdistPath" in text
-    assert '& $python -m pip install --disable-pip-version-check "httpx>=0.27"' in text
+    assert "$venvBin" in text
+    assert "$env:OS" in text
+    assert '$requirementsPath = Join-Path $repoRoot "requirements.txt"' in text
+    assert "$runtimeRequirements" in text
+    assert '"httpx>=0.27"' not in text
     assert (
         "& $python -m pip install --disable-pip-version-check "
         "--no-index --no-deps $wheelPath"
     ) in text
+
+
+def test_package_verifier_requires_exactly_one_wheel_and_sdist() -> None:
+    text = (ROOT / "scripts" / "verify-package.ps1").read_text(encoding="utf-8")
+    assert "$actualArtifactNames" in text
+    assert "Expected exactly these package files" in text
+    assert "$matchingWheels.Count -ne 1" in text
 
 
 def test_package_verifier_sets_repository_root_before_relative_commands() -> None:

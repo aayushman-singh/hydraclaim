@@ -64,13 +64,25 @@ if ($LASTEXITCODE -ne 0) {
     throw "Could not create the clean virtual environment at $venv."
 }
 
-$python = Join-Path $venv "Scripts/python.exe"
-$cli = Join-Path $venv "Scripts/hydraclaim.exe"
+$venvBin = if ($env:OS -eq "Windows_NT") { "Scripts" } else { "bin" }
+$pythonName = if ($env:OS -eq "Windows_NT") { "python.exe" } else { "python" }
+$cliName = if ($env:OS -eq "Windows_NT") { "hydraclaim.exe" } else { "hydraclaim" }
+$python = Join-Path (Join-Path $venv $venvBin) $pythonName
+$cli = Join-Path (Join-Path $venv $venvBin) $cliName
 if (-not (Test-Path -LiteralPath $python)) {
     throw "The virtual environment does not contain $python."
 }
 
-& $python -m pip install --disable-pip-version-check "httpx>=0.27"
+$requirementsPath = Join-Path $repoRoot "requirements.txt"
+$runtimeRequirements = @(
+    Get-Content -LiteralPath $requirementsPath |
+        ForEach-Object { $_.Trim() } |
+        Where-Object { $_ -and -not $_.StartsWith("#") }
+)
+if ($runtimeRequirements.Count -eq 0) {
+    throw "No runtime requirements found in $requirementsPath."
+}
+& $python -m pip install --disable-pip-version-check $runtimeRequirements
 if ($LASTEXITCODE -ne 0) {
     throw "Could not install the HydraClaim runtime dependencies."
 }
