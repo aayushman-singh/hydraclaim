@@ -67,23 +67,27 @@ Requires Python 3.11+ and Docker (for the local HydraDB node).
 ```bash
 git clone https://github.com/aayushman-singh/hydraclaim.git
 cd hydraclaim
-pip install -r requirements.txt
+pip install hydraclaim
 
 # 1. Start a local HydraDB node (HTTP on 8443, Bolt on 7687)
 bash scripts/dev-up.sh
 
 # 2. Verify HydraDB supports every Cypher feature this project needs
-python -m hydraclaim.schema --verify
+hydraclaim schema --verify
 
 # 3. Generate the synthetic benchmark data (deterministic)
-python -m hydraclaim.generate
+hydraclaim generate
 
 # 4. Ingest a scenario into HydraDB
-python -m hydraclaim.ingest data/sessions/deadline_drift.json
+hydraclaim ingest data/sessions/deadline_drift.json
 
 # 5. Run the API server (serves /ask, /graph, /scenarios, /health)
-python -m hydraclaim.serve --host 127.0.0.1 --port 8000
+hydraclaim serve --host 127.0.0.1 --port 8000
 ```
+
+The installed `hydraclaim` command is the supported interface. The older
+`python -m hydraclaim.<command>` forms remain available for compatibility with
+existing scripts.
 
 To run the web app locally against your own server, edit `web/config.js` and
 point `window.HYDRACLAIM_API` at `http://127.0.0.1:8000`, then serve the `web/`
@@ -95,7 +99,7 @@ The API sends `Access-Control-Allow-Origin: *`, so a plain site works.
 ```bash
 # Question classification uses DeepSeek when LLM_API_KEY is set
 # (LLM_BASE_URL / LLM_MODEL are optional); otherwise a keyword heuristic routes.
-python -m hydraclaim.ask "What is the current launch deadline?" --verbose
+hydraclaim ask "What is the current launch deadline?" --verbose
 ```
 
 ### Use the extraction pipeline
@@ -104,11 +108,11 @@ Requires an LLM endpoint (`LLM_API_KEY`, optionally `LLM_BASE_URL` and `LLM_MODE
 
 ```bash
 # Extract claims and score them against ground truth
-python -m hydraclaim.extract data/sessions/deadline_drift.json --emit drafts.json
-python -m hydraclaim.evaluate data/sessions/deadline_drift.json drafts.json
+hydraclaim extract data/sessions/deadline_drift.json --emit drafts.json
+hydraclaim evaluate data/sessions/deadline_drift.json drafts.json
 
 # Or run the full pipeline: extract -> reconcile -> write into HydraDB
-python -m hydraclaim.pipeline data/sessions/deadline_drift.json
+hydraclaim pipeline data/sessions/deadline_drift.json
 ```
 
 ### Run the tests
@@ -165,7 +169,7 @@ Synthetic conflict suite, **50 questions across 16 scenarios** (oracle ground-tr
 ingestion):
 
 ```bash
-python -m hydraclaim.benchmark data/sessions/*.json --arm all
+hydraclaim benchmark data/sessions/*.json --arm all
 ```
 
 | Arm | Accuracy | Abstention P/R | Queries/q | p95 latency |
@@ -200,10 +204,10 @@ exercises the same five LongMemEval abilities (IE, multi-session, temporal,
 knowledge update, abstention) in the system's intended domain. To try the
 converter on the real data, download `longmemeval_oracle.json` from the
 [LongMemEval HuggingFace dataset](https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned)
-and run `python -m hydraclaim.longmemeval convert <file> --out data/longmemeval/scenarios`.
+and run `hydraclaim longmemeval convert <file> --out data/longmemeval/scenarios`.
 
 End-to-end extraction from a local model scores `P=1.000 / R=1.000 / F1=1.000`
-on the deadline-drift scenario (see `python -m hydraclaim.evaluate`). Extraction
+on the deadline-drift scenario (see `hydraclaim evaluate`). Extraction
 is LLM-only; every query-path answer is deterministic.
 
 ## Repo map

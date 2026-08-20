@@ -20,6 +20,24 @@ def test_project_metadata_is_complete() -> None:
     assert project["requires-python"] == ">=3.11"
 
 
+def test_readme_uses_installed_command() -> None:
+    text = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "pip install hydraclaim" in text
+    assert "hydraclaim ask" in text
+    assert "hydraclaim serve" in text
+
+
+def test_package_verifier_selects_only_the_release_wheel() -> None:
+    text = (ROOT / "scripts" / "verify-package.ps1").read_text(encoding="utf-8")
+
+    assert '$ErrorActionPreference = "Stop"' in text
+    assert '$expectedWheelName = "hydraclaim-0.2.0-py3-none-any.whl"' in text
+    assert "Where-Object Name -eq $expectedWheelName" in text
+    assert "$matchingWheels.Count -ne 1" in text
+    assert "$wheelPath" in text
+
+
 def test_project_declares_hatchling_and_explicit_package_inclusion() -> None:
     metadata = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
 

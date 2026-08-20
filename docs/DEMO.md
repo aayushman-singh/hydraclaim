@@ -20,6 +20,24 @@ curl -s https://hydraclaim-api.aayushman.dev/suggestions
 
 Open the app, land on the **Console → Ask** tab. Hard-refresh so the newest build loads.
 
+## Local CLI demo
+
+Install the release package before you run the local workflow:
+
+```bash
+pip install hydraclaim
+hydraclaim generate
+hydraclaim ingest data/sessions/deadline_drift.json
+hydraclaim ask "What is the current launch deadline?" --verbose
+hydraclaim benchmark data/sessions/*.json --arm all
+```
+
+On Windows, verify a clean installation from the exact release wheel:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/verify-package.ps1
+```
+
 ---
 
 ## 1. The router trace (30s) — Ask a hard question
