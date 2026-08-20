@@ -27,11 +27,29 @@ from hydraclaim.claims import PREDICATES, SOURCE_KINDS
 
 
 _MONTHS = {
-    "january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6,
-    "july": 7, "august": 8, "september": 9, "october": 10, "november": 11,
+    "january": 1,
+    "february": 2,
+    "march": 3,
+    "april": 4,
+    "may": 5,
+    "june": 6,
+    "july": 7,
+    "august": 8,
+    "september": 9,
+    "october": 10,
+    "november": 11,
     "december": 12,
-    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "jun": 6, "jul": 7, "aug": 8,
-    "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+    "jan": 1,
+    "feb": 2,
+    "mar": 3,
+    "apr": 4,
+    "jun": 6,
+    "jul": 7,
+    "aug": 8,
+    "sep": 9,
+    "oct": 10,
+    "nov": 11,
+    "dec": 12,
 }
 
 _DATE_RE = re.compile(
@@ -39,45 +57,56 @@ _DATE_RE = re.compile(
     re.IGNORECASE,
 )
 
+_DATE_PREDICATES = frozenset({"deadline"})
 
-def _reference_date(msg: dict) -> date:
-    """Best-effort reference date from a message timestamp."""
-    ts = msg.get("ts", "")
+
+def _reference_date(session: dict) -> date:
+    """Return the session date from its timestamp, or raise on bad input."""
+    raw = session.get("started_at")
+    if raw is None and "messages" in session:
+        messages = session.get("messages")
+        if isinstance(messages, list) and messages:
+            first_message = messages[0]
+            raw = first_message.get("ts") if isinstance(first_message, dict) else None
+    if raw is None:
+        raw = session.get("ts")
     try:
-        return date.fromisoformat(ts[:10])
-    except ValueError:
-        pass
-    try:
-        return datetime.fromisoformat(ts).date()
-    except ValueError:
-        return date.today()
+        return datetime.fromisoformat(raw.replace("Z", "+00:00")).date()
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise ValueError(f"invalid session timestamp: {raw!r}") from exc
 
 
-def _normalize_value(value: str, msg: dict) -> str:
+def _normalize_value(value: str, msg: dict, predicate: str = "deadline") -> str:
     """Convert natural-language dates in a value to YYYY-MM-DD.
 
     If the value is already ISO-like, leave it. Otherwise look for month/day
     patterns and resolve them using the message year.
     """
     value = str(value).strip()
-    if re.match(r"^\d{4}-\d{2}-\d{2}$", value):
+    if predicate not in _DATE_PREDICATES:
         return value
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", value):
+        try:
+            return date.fromisoformat(value).isoformat()
+        except ValueError as exc:
+            raise ValueError(f"invalid {predicate} value: {value!r}") from exc
     match = _DATE_RE.search(value)
     if not match:
-        return value
-    ref = _reference_date(msg)
+        raise ValueError(f"invalid {predicate} value: {value!r}")
+    ref = _reference_date({"messages": [msg]})
     month = match.group("month") or match.group("month2")
     day = match.group("day") or match.group("day2")
     try:
         month_num = _MONTHS[month.lower()]
         day_num = int(day)
-        normalized = date(ref.year, month_num, day_num).isoformat()
-        return normalized
-    except (KeyError, ValueError):
-        return value
+        return date(ref.year, month_num, day_num).isoformat()
+    except (KeyError, ValueError) as exc:
+        raise ValueError(f"invalid {predicate} value: {value!r}") from exc
 
 
-def _validate_supersedes(raw: object, active_ids: set[str]) -> tuple[str | None, str | None]:
+def _validate_supersedes(
+    raw: object, active_ids: set[str]
+) -> tuple[str | None, str | None]:
     """Return (target_id, warning) tuple."""
     if raw is None or raw == "":
         return None, None
@@ -95,10 +124,13 @@ def build_messages(
         {"name": e["name"], "aliases": e.get("aliases", []), "type": e.get("type", "")}
         for e in entities
     ]
-    active_lines = "\n".join(
-        f"  {c['id']} | {c['subject']} | {c['predicate']} | {c['value']} | {c['valid_from']}"
-        for c in active_claims
-    ) or "  (none)"
+    active_lines = (
+        "\n".join(
+            f"  {c['id']} | {c['subject']} | {c['predicate']} | {c['value']} | {c['valid_from']}"
+            for c in active_claims
+        )
+        or "  (none)"
+    )
     message_lines = "\n".join(
         f"[{m['msg_id']}] {m['ts']} {m['author']} ({m['source_kind']}, {m['channel']}): {m['text']}"
         for m in session["messages"]
@@ -136,7 +168,7 @@ Respond with strict JSON only, shape:
 ACTIVE CLAIMS (id | subject | predicate | value | valid_from):
 {active_lines}
 
-SESSION {session['session_id']} MESSAGES:
+SESSION {session["session_id"]} MESSAGES:
 {message_lines}"""
 
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
@@ -150,10 +182,14 @@ def _score(value: object, default: float) -> tuple[float, bool]:
     return min(max(f, 0.0), 1.0), True
 
 
-def parse_claims(response_json: object, session: dict,
-                 active_claims: list[dict] | None = None) -> tuple[list[dict], list[str]]:
-    """Validate raw LLM output into drafts. Never raises on bad LLM output —
-    drops the offending claim and records a human-readable warning."""
+def parse_claims(
+    response_json: object, session: dict, active_claims: list[dict] | None = None
+) -> tuple[list[dict], list[str]]:
+    """Validate raw LLM output into drafts and record non-temporal warnings.
+
+    Invalid temporal input raises so extraction cannot continue with an
+    incorrect date.
+    """
     if isinstance(response_json, dict):
         raw_claims = response_json.get("claims", [])
     elif isinstance(response_json, list):
@@ -172,23 +208,35 @@ def parse_claims(response_json: object, session: dict,
             warnings.append(f"{where}: not an object, dropped")
             continue
         if raw.get("predicate") not in PREDICATES:
-            warnings.append(f"{where}: unknown predicate {raw.get('predicate')!r}, dropped")
+            warnings.append(
+                f"{where}: unknown predicate {raw.get('predicate')!r}, dropped"
+            )
             continue
         if raw.get("source_kind") not in SOURCE_KINDS:
-            warnings.append(f"{where}: unknown source_kind {raw.get('source_kind')!r}, dropped")
+            warnings.append(
+                f"{where}: unknown source_kind {raw.get('source_kind')!r}, dropped"
+            )
             continue
         msg = by_msg_id.get(raw.get("msg_id", ""))
         if msg is None:
-            warnings.append(f"{where}: msg_id {raw.get('msg_id')!r} not in session, dropped")
+            warnings.append(
+                f"{where}: msg_id {raw.get('msg_id')!r} not in session, dropped"
+            )
             continue
         quote = raw.get("quote")
         if not isinstance(quote, str) or not quote or quote not in msg["text"]:
-            warnings.append(f"{where}: quote not found verbatim in {msg['msg_id']}, dropped")
+            warnings.append(
+                f"{where}: quote not found verbatim in {msg['msg_id']}, dropped"
+            )
             continue
         try:
-            valid_from = date.fromisoformat(str(raw.get("valid_from", ""))[:10]).isoformat()
+            valid_from = date.fromisoformat(
+                str(raw.get("valid_from", ""))[:10]
+            ).isoformat()
         except ValueError:
-            warnings.append(f"{where}: bad valid_from {raw.get('valid_from')!r}, dropped")
+            warnings.append(
+                f"{where}: bad valid_from {raw.get('valid_from')!r}, dropped"
+            )
             continue
         if not isinstance(raw.get("subject"), str) or not raw["subject"].strip():
             warnings.append(f"{where}: missing subject, dropped")
@@ -196,12 +244,16 @@ def parse_claims(response_json: object, session: dict,
 
         explicitness, ok = _score(raw.get("explicitness"), 1.0)
         if not ok:
-            warnings.append(f"{where}: explicitness {raw.get('explicitness')!r} -> default 1.0")
+            warnings.append(
+                f"{where}: explicitness {raw.get('explicitness')!r} -> default 1.0"
+            )
         confidence, ok = _score(raw.get("confidence"), 0.5)
         if not ok:
-            warnings.append(f"{where}: confidence {raw.get('confidence')!r} -> default 0.5")
+            warnings.append(
+                f"{where}: confidence {raw.get('confidence')!r} -> default 0.5"
+            )
 
-        value = _normalize_value(raw.get("value", ""), msg)
+        value = _normalize_value(raw.get("value", ""), msg, raw["predicate"])
         supersedes, warn = _validate_supersedes(raw.get("supersedes"), active_ids)
         if warn:
             warnings.append(f"{where}: {warn}")
@@ -273,12 +325,15 @@ def main() -> None:
             draft["id"] = f"{scen}:x{len(all_drafts) + 1}"
             all_drafts.append(draft)
         active = _update_active(active, drafts)
-        print(f"{session['session_id']}: {len(drafts)} claim(s), {len(warnings)} warning(s)")
+        print(
+            f"{session['session_id']}: {len(drafts)} claim(s), {len(warnings)} warning(s)"
+        )
 
     if args.emit:
         out = {"scenario_id": scen, "drafts": all_drafts}
-        Path(args.emit).write_text(json.dumps(out, indent=2, sort_keys=True) + "\n",
-                                   encoding="utf-8")
+        Path(args.emit).write_text(
+            json.dumps(out, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
         print(f"wrote {len(all_drafts)} draft(s) to {args.emit}")
 
 

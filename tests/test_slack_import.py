@@ -2,20 +2,41 @@
 
 from __future__ import annotations
 
-from hydraclaim.slack_import import _strip_slack_formatting, parse_slack_export
+import pytest
+
+from hydraclaim.slack_import import (
+    _msg_timestamp,
+    _strip_slack_formatting,
+    parse_slack_export,
+)
+
+
+def test_slack_timestamp_rejects_invalid_value():
+    with pytest.raises(ValueError, match="Slack timestamp"):
+        _msg_timestamp({"ts": "invalid"})
 
 
 def test_strip_user_mention():
-    assert _strip_slack_formatting("Hey <@U1234|alice>, check this") == "Hey alice, check this"
-    assert _strip_slack_formatting("Hey <@U1234>, check this") == "Hey someone, check this"
+    assert (
+        _strip_slack_formatting("Hey <@U1234|alice>, check this")
+        == "Hey alice, check this"
+    )
+    assert (
+        _strip_slack_formatting("Hey <@U1234>, check this") == "Hey someone, check this"
+    )
 
 
 def test_strip_url_with_label():
-    assert _strip_slack_formatting("See <https://example.com|the docs>") == "See the docs"
+    assert (
+        _strip_slack_formatting("See <https://example.com|the docs>") == "See the docs"
+    )
 
 
 def test_strip_bare_url():
-    assert _strip_slack_formatting("Link: <https://example.com>") == "Link: https://example.com"
+    assert (
+        _strip_slack_formatting("Link: <https://example.com>")
+        == "Link: https://example.com"
+    )
 
 
 def test_strip_channel_ref():
@@ -52,8 +73,14 @@ def test_parse_groups_by_day():
 
 
 def test_parse_message_fields():
-    msgs = [{"ts": "1716000000.000", "text": "the deadline is Oct 3",
-             "user": "alice", "user_profile": {"real_name": "Alice Smith"}}]
+    msgs = [
+        {
+            "ts": "1716000000.000",
+            "text": "the deadline is Oct 3",
+            "user": "alice",
+            "user_profile": {"real_name": "Alice Smith"},
+        }
+    ]
     sessions = parse_slack_export(msgs, "proj")
     m = sessions[0]["messages"][0]
     assert m["author"] == "Alice Smith"

@@ -1,15 +1,28 @@
 from hydraclaim.extract import _update_active, build_messages, parse_claims
+from hydraclaim.extract import _reference_date
+
+import pytest
 
 SESSION = {
     "session_id": "s6",
     "started_at": "2026-05-18T09:00:00+00:00",
     "messages": [
-        {"msg_id": "s6-m001", "ts": "2026-05-18T09:05:00+00:00", "author": "Meeting notes",
-         "source_kind": "meeting", "channel": "fireflies",
-         "text": "Final call in roadmap review: the launch deadline locks at October 17."},
-        {"msg_id": "s6-m002", "ts": "2026-05-18T09:07:00+00:00", "author": "Asha Rao",
-         "source_kind": "slack", "channel": "#general",
-         "text": "Standup notes: backend pair continuing on the search indexing bug."},
+        {
+            "msg_id": "s6-m001",
+            "ts": "2026-05-18T09:05:00+00:00",
+            "author": "Meeting notes",
+            "source_kind": "meeting",
+            "channel": "fireflies",
+            "text": "Final call in roadmap review: the launch deadline locks at October 17.",
+        },
+        {
+            "msg_id": "s6-m002",
+            "ts": "2026-05-18T09:07:00+00:00",
+            "author": "Asha Rao",
+            "source_kind": "slack",
+            "channel": "#general",
+            "text": "Standup notes: backend pair continuing on the search indexing bug.",
+        },
     ],
 }
 
@@ -39,16 +52,34 @@ GOOD_RESPONSE = {
 
 
 def test_build_messages_injects_context():
-    active = [{"id": "deadline_drift:s3:x1", "subject": "product launch",
-               "predicate": "deadline", "value": "2026-10-10", "valid_from": "2026-05-10",
-               "source_kind": "slack", "author": "Mina Okafor"}]
+    active = [
+        {
+            "id": "deadline_drift:s3:x1",
+            "subject": "product launch",
+            "predicate": "deadline",
+            "value": "2026-10-10",
+            "valid_from": "2026-05-10",
+            "source_kind": "slack",
+            "author": "Mina Okafor",
+        }
+    ]
     messages = build_messages(SESSION, ENTITIES, active)
     assert messages[0]["role"] == "system" and messages[1]["role"] == "user"
     system, user = messages[0]["content"], messages[1]["content"]
     assert "deadline" in system and "owned_by" in system  # predicate vocab injected
-    assert '"the launch"' in user                         # aliases injected
-    assert "deadline_drift:s3:x1" in user                 # active claim id injected
-    assert "s6-m001" in user                              # message ids present
+    assert '"the launch"' in user  # aliases injected
+    assert "deadline_drift:s3:x1" in user  # active claim id injected
+    assert "s6-m001" in user  # message ids present
+
+
+def test_reference_date_rejects_invalid_timestamp():
+    with pytest.raises(ValueError, match="session timestamp"):
+        _reference_date({"messages": [{"ts": "not-a-date"}]})
+
+
+def test_parse_claims_rejects_unparseable_date_predicate_value():
+    with pytest.raises(ValueError, match="deadline.*not-a-date"):
+        parse_claims(_single({"value": "not-a-date"}), SESSION)
 
 
 def test_build_messages_empty_active_claims():
@@ -67,9 +98,17 @@ def test_parse_claims_roundtrip():
     assert draft["session_id"] == "s6"
 
 
-ACTIVE = [{"id": "deadline_drift:s3:x1", "subject": "product launch",
-           "predicate": "deadline", "value": "2026-10-10", "valid_from": "2026-05-10",
-           "source_kind": "slack", "author": "Mina Okafor"}]
+ACTIVE = [
+    {
+        "id": "deadline_drift:s3:x1",
+        "subject": "product launch",
+        "predicate": "deadline",
+        "value": "2026-10-10",
+        "valid_from": "2026-05-10",
+        "source_kind": "slack",
+        "author": "Mina Okafor",
+    }
+]
 
 
 def _single(overrides):
@@ -109,11 +148,28 @@ def test_empty_claims_list():
 
 
 def test_update_active_drops_superseded():
-    active = [{"id": "a:1", "subject": "product launch", "predicate": "deadline",
-               "value": "2026-10-10", "valid_from": "2026-05-10",
-               "source_kind": "slack", "author": "Mina Okafor"}]
-    drafts = [{"id": "a:2", "subject": "product launch", "predicate": "deadline",
-               "value": "2026-10-17", "valid_from": "2026-05-18",
-               "source_kind": "meeting", "author": "Meeting notes", "supersedes": "a:1"}]
+    active = [
+        {
+            "id": "a:1",
+            "subject": "product launch",
+            "predicate": "deadline",
+            "value": "2026-10-10",
+            "valid_from": "2026-05-10",
+            "source_kind": "slack",
+            "author": "Mina Okafor",
+        }
+    ]
+    drafts = [
+        {
+            "id": "a:2",
+            "subject": "product launch",
+            "predicate": "deadline",
+            "value": "2026-10-17",
+            "valid_from": "2026-05-18",
+            "source_kind": "meeting",
+            "author": "Meeting notes",
+            "supersedes": "a:1",
+        }
+    ]
     updated = _update_active(active, drafts)
     assert [c["id"] for c in updated] == ["a:2"]

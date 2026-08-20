@@ -15,10 +15,14 @@ from datetime import datetime, timezone
 
 def _strip_slack_formatting(text: str) -> str:
     """Remove Slack-specific markup: user mentions, URL labels, channel refs."""
-    text = re.sub(r"<@[A-Z0-9]+(?:\|([^>]+))?>", lambda m: m.group(1) or "someone", text)
+    text = re.sub(
+        r"<@[A-Z0-9]+(?:\|([^>]+))?>", lambda m: m.group(1) or "someone", text
+    )
     text = re.sub(r"<(https?://[^|>]+)\|([^>]+)>", r"\2", text)
     text = re.sub(r"<(https?://[^>]+)>", r"\1", text)
-    text = re.sub(r"<#[A-Z0-9]+(?:\|([^>]+))?>", lambda m: m.group(1) or "#channel", text)
+    text = re.sub(
+        r"<#[A-Z0-9]+(?:\|([^>]+))?>", lambda m: m.group(1) or "#channel", text
+    )
     text = re.sub(r"&amp;", "&", text)
     text = re.sub(r"&lt;", "<", text)
     text = re.sub(r"&gt;", ">", text)
@@ -35,13 +39,13 @@ def _author_name(msg: dict) -> str:
     return msg.get("user", "unknown")
 
 
-def _msg_timestamp(msg: dict) -> datetime:
-    """Parse Slack's ts field (unix epoch with microseconds)."""
-    ts = msg.get("ts", "0")
+def _msg_timestamp(msg: dict) -> str:
+    """Parse Slack's ``ts`` field and return an ISO-8601 timestamp."""
+    raw = msg.get("ts")
     try:
-        return datetime.fromtimestamp(float(ts), tz=timezone.utc)
-    except (ValueError, TypeError, OSError):
-        return datetime.now(timezone.utc)
+        return datetime.fromtimestamp(float(raw), tz=timezone.utc).isoformat()
+    except (ValueError, TypeError, OSError, OverflowError) as exc:
+        raise ValueError(f"invalid Slack timestamp: {raw!r}") from exc
 
 
 def parse_slack_export(
@@ -62,26 +66,31 @@ def parse_slack_export(
         if not text or not text.strip():
             continue
 
-        dt = _msg_timestamp(msg)
+        timestamp = _msg_timestamp(msg)
+        dt = datetime.fromisoformat(timestamp)
         day = dt.date().isoformat()
         author = _author_name(msg)
         clean_text = _strip_slack_formatting(text)
 
-        by_day[day].append({
-            "msg_id": f"slack-{channel}-{msg.get('ts', '0').replace('.', '-')}",
-            "ts": dt.isoformat(),
-            "author": author,
-            "source_kind": "slack",
-            "channel": channel,
-            "text": clean_text,
-        })
+        by_day[day].append(
+            {
+                "msg_id": f"slack-{channel}-{msg.get('ts', '0').replace('.', '-')}",
+                "ts": dt.isoformat(),
+                "author": author,
+                "source_kind": "slack",
+                "channel": channel,
+                "text": clean_text,
+            }
+        )
 
     sessions = []
     for day in sorted(by_day.keys()):
         msgs = sorted(by_day[day], key=lambda m: m["ts"])
-        sessions.append({
-            "session_id": f"slack-{channel}-{day}",
-            "messages": msgs,
-        })
+        sessions.append(
+            {
+                "session_id": f"slack-{channel}-{day}",
+                "messages": msgs,
+            }
+        )
 
     return sessions
