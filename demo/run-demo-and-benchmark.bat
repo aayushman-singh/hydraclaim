@@ -8,10 +8,10 @@ echo === HydraClaim live demo ===
 bash scripts\demo.sh
 echo.
 echo === Re-ingest all scenarios for benchmark ===
-for %%f in (data\sessions\*.json) do python -m hydraclaim.ingest "%%f"
+for %%f in (data\sessions\*.json) do hydraclaim ingest "%%f"
 echo.
 echo === Benchmark ===
-python -m hydraclaim.benchmark data\sessions\*.json --arm all
+hydraclaim benchmark data\sessions\*.json --arm all
 echo.
 echo done > demo\record-done.txt
 echo Recording complete. Closing in 3 seconds...

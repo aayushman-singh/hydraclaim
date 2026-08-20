@@ -4,7 +4,6 @@ import tomllib
 import zipfile
 
 import hydraclaim
-import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -18,6 +17,8 @@ def test_project_metadata_is_complete() -> None:
     assert project["version"] == "0.2.0"
     assert project["scripts"]["hydraclaim"] == "hydraclaim.cli:main"
     assert project["requires-python"] == ">=3.11"
+    assert "Programming Language :: Python :: 3.12" in project["classifiers"]
+    assert "Programming Language :: Python :: 3.13" in project["classifiers"]
 
 
 def test_readme_uses_installed_command() -> None:
@@ -26,6 +27,8 @@ def test_readme_uses_installed_command() -> None:
     assert "pip install hydraclaim" in text
     assert "hydraclaim ask" in text
     assert "hydraclaim serve" in text
+    assert "hydraclaim ask --llm" in text
+    assert "LLM_API_KEY alone never changes mode" in text
 
 
 def test_package_verifier_selects_only_the_release_wheel() -> None:
@@ -33,9 +36,14 @@ def test_package_verifier_selects_only_the_release_wheel() -> None:
 
     assert '$ErrorActionPreference = "Stop"' in text
     assert '$expectedWheelName = "hydraclaim-0.2.0-py3-none-any.whl"' in text
+    assert '$expectedSdistName = "hydraclaim-0.2.0.tar.gz"' in text
+    assert "$expectedArtifactNames" in text
+    assert "$hostPython -m build" in text
+    assert "$hostPython -m pytest tests/test_package_metadata.py" in text
     assert "Where-Object Name -eq $expectedWheelName" in text
-    assert "$matchingWheels.Count -ne 1" in text
+    assert "$actualArtifactNames" in text
     assert "$wheelPath" in text
+    assert "$sdistPath" in text
     assert '& $python -m pip install --disable-pip-version-check "httpx>=0.27"' in text
     assert (
         "& $python -m pip install --disable-pip-version-check "
@@ -78,6 +86,17 @@ def test_source_archive_excludes_tests_and_build_artifacts() -> None:
         "/*.egg-info/**",
         "/.env",
         "/.env.*",
+        "/**/auth-token",
+        "/**/token",
+        "/**/credential",
+        "/**/credentials",
+        "/**/key",
+        "/**/*.token",
+        "/**/*.credential",
+        "/**/*.credentials",
+        "/**/*.key",
+        "/**/*.env",
+        "/**/*.env.*",
         "/.pytest_cache/**",
         "/.ruff_cache/**",
         "/.worktrees/**",
@@ -87,6 +106,8 @@ def test_source_archive_excludes_tests_and_build_artifacts() -> None:
         "/.venv-package-test/**",
     }
     assert required_exclusions <= set(exclusions)
+    assert not any("*key*" in pattern for pattern in exclusions)
+    assert not any("*token*" in pattern for pattern in exclusions)
 
 
 def test_package_does_not_duplicate_project_version() -> None:
@@ -115,10 +136,16 @@ def test_distribution_includes_schema_resource() -> None:
 
 
 def test_release_archives_exclude_local_and_generated_content() -> None:
-    wheel_path = next((ROOT / "dist").glob("*.whl"), None)
-    sdist_path = next((ROOT / "dist").glob("*.tar.gz"), None)
-    if wheel_path is None or sdist_path is None:
-        pytest.skip("build artifacts are not present")
+    dist_dir = ROOT / "dist"
+    expected_names = {
+        "hydraclaim-0.2.0-py3-none-any.whl",
+        "hydraclaim-0.2.0.tar.gz",
+    }
+    assert dist_dir.is_dir()
+    actual_names = {path.name for path in dist_dir.iterdir() if path.is_file()}
+    assert actual_names == expected_names
+    wheel_path = dist_dir / "hydraclaim-0.2.0-py3-none-any.whl"
+    sdist_path = dist_dir / "hydraclaim-0.2.0.tar.gz"
 
     with zipfile.ZipFile(wheel_path) as archive:
         wheel_names = archive.namelist()
@@ -156,6 +183,10 @@ def test_release_archives_exclude_local_and_generated_content() -> None:
         "longmemeval",
         "results",
         "auth-token",
+        "token",
+        "credential",
+        "credentials",
+        "key",
     }
 
     def forbidden_name(name: str) -> bool:
@@ -167,6 +198,7 @@ def test_release_archives_exclude_local_and_generated_content() -> None:
                 or part.endswith(".egg-info")
                 or part.startswith(".env")
                 or part == "auth-token"
+                or part.endswith((".token", ".credential", ".credentials", ".key"))
                 or part.endswith(".pyc")
                 for part in parts
             )
@@ -200,3 +232,14 @@ def test_release_archives_exclude_local_and_generated_content() -> None:
     assert "License-File: LICENSE" in wheel_metadata
     readme = (ROOT / "README.md").read_text(encoding="utf-8").strip()
     assert readme in wheel_metadata
+
+
+def test_demo_scripts_use_installed_commands() -> None:
+    scripts = (
+        ROOT / "scripts" / "demo.sh",
+        ROOT / "demo" / "run-demo-and-benchmark.bat",
+        ROOT / "demo" / "build-video.sh",
+    )
+    for path in scripts:
+        text = path.read_text(encoding="utf-8")
+        assert "python -m hydraclaim" not in text

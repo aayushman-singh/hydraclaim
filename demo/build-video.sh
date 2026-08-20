@@ -28,8 +28,8 @@ card_to_video outro.png     5  outro.mp4
 bash scripts/demo.sh > demo/demo-output.txt 2>&1
 # The demo only ingests 2 scenarios; the benchmark covers all 8, so ingest
 # the rest first (idempotent) before capturing the ablation table.
-python -m hydraclaim.ingest data/sessions/*.json > /dev/null
-python -m hydraclaim.benchmark data/sessions/*.json --arm all \
+hydraclaim ingest data/sessions/*.json > /dev/null
+hydraclaim benchmark data/sessions/*.json --arm all \
   > demo/bench-output.txt 2>&1
 
 # 4. Render the text captures as scrolling terminal clips.

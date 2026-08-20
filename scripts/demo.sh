@@ -11,7 +11,7 @@ banner() {
 }
 
 banner "1. Generate deterministic synthetic scenarios"
-python -m hydraclaim.generate
+hydraclaim generate
 
 banner "2. Start local HydraDB node"
 if ! command -v docker >/dev/null 2>&1; then
@@ -31,7 +31,7 @@ for label in ("Claim", "Evidence", "Source", "Entity"):
 db.close()'
 
 banner "4. Ingest oracle ground-truth claims"
-python -m hydraclaim.ingest \
+hydraclaim ingest \
   data/sessions/payments_owner_conflict.json \
   data/sessions/deadline_drift.json
 
@@ -43,22 +43,22 @@ header() {
 }
 
 header "Conflict: Who owns the payments integration?"
-python -m hydraclaim.ask "Who owns the payments integration?" --verbose
+hydraclaim ask "Who owns the payments integration?" --verbose
 
 header "Knowledge update: What is the current launch deadline?"
-python -m hydraclaim.ask "What is the current launch deadline?" --verbose
+hydraclaim ask "What is the current launch deadline?" --verbose
 
 header "Temporal: What was the launch deadline before the most recent change?"
-python -m hydraclaim.ask "What was the launch deadline before the most recent change?" --verbose
+hydraclaim ask "What was the launch deadline before the most recent change?" --verbose
 
 header "Abstention: What is the payments integration's uptime SLA?"
-python -m hydraclaim.ask "What is the payments integration's uptime SLA?" --verbose
+hydraclaim ask "What is the payments integration's uptime SLA?" --verbose
 
 banner "6. Optional live extraction evaluation (needs LLM_API_KEY)"
 if [ -n "${LLM_API_KEY:-}" ]; then
-  python -m hydraclaim.extract data/sessions/deadline_drift.json \
+  hydraclaim extract data/sessions/deadline_drift.json \
     --emit /tmp/tg-drafts.json
-  python -m hydraclaim.evaluate data/sessions/deadline_drift.json \
+  hydraclaim evaluate data/sessions/deadline_drift.json \
     /tmp/tg-drafts.json
 else
   echo "LLM_API_KEY not set; skipping extraction/evaluation section"

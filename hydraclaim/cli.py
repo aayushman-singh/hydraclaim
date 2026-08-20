@@ -68,3 +68,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     command_module = importlib.import_module(module_name)
     result = command_module.main(parsed.command_args)
     return 0 if result is None else result
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
