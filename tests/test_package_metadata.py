@@ -36,6 +36,11 @@ def test_package_verifier_selects_only_the_release_wheel() -> None:
     assert "Where-Object Name -eq $expectedWheelName" in text
     assert "$matchingWheels.Count -ne 1" in text
     assert "$wheelPath" in text
+    assert '& $python -m pip install --disable-pip-version-check "httpx>=0.27"' in text
+    assert (
+        "& $python -m pip install --disable-pip-version-check "
+        "--no-index --no-deps $wheelPath"
+    ) in text
 
 
 def test_project_declares_hatchling_and_explicit_package_inclusion() -> None:

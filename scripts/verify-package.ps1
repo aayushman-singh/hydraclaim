@@ -29,7 +29,12 @@ if (-not (Test-Path -LiteralPath $python)) {
     throw "The virtual environment does not contain $python."
 }
 
-& $python -m pip install --disable-pip-version-check $wheelPath
+& $python -m pip install --disable-pip-version-check "httpx>=0.27"
+if ($LASTEXITCODE -ne 0) {
+    throw "Could not install the HydraClaim runtime dependencies."
+}
+
+& $python -m pip install --disable-pip-version-check --no-index --no-deps $wheelPath
 if ($LASTEXITCODE -ne 0) {
     throw "Could not install the exact release wheel $wheelPath."
 }

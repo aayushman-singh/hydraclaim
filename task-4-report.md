@@ -32,3 +32,16 @@ HydraClaim now has a Windows clean-install verifier for release `0.2.0`.
 - `README.md`
 - `docs/DEMO.md`
 - `tests/test_package_metadata.py`
+
+## Round 1 remediation
+
+The verifier now installs runtime dependencies in a separate setup step.
+It then installs the validated wheel path with `--no-index --no-deps`.
+Pip does not select HydraClaim by package name or fetch another HydraClaim artifact.
+
+Additional verification:
+
+- `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/verify-package.ps1`: passed.
+- The verifier installed `httpx>=0.27` first.
+- The verifier installed `dist/hydraclaim-0.2.0-py3-none-any.whl` with `--no-index --no-deps`.
+- `python -m pytest tests/test_package_metadata.py -q`: 10 passed.
