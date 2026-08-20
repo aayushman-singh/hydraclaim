@@ -3,10 +3,37 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "publish.yml"
+CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 
 
-def _workflow_text() -> str:
-    return WORKFLOW.read_text(encoding="utf-8")
+def _workflow_text(workflow: Path = WORKFLOW) -> str:
+    return workflow.read_text(encoding="utf-8")
+
+
+def _assert_staged_tests(text: str) -> None:
+    source_tests = 'python -m pytest tests/ -v -m "not artifact"'
+    clean_dist = (
+        "python -c \"import shutil; shutil.rmtree('dist', ignore_errors=True)\""
+    )
+    build = "python -m build"
+    twine_check = "python -m twine check dist/*"
+    artifact_tests = "python -m pytest tests/ -v -m artifact"
+    commands = [
+        line.strip()[len("- run: ") :]
+        for line in text.splitlines()
+        if line.strip().startswith("- run: ")
+    ]
+
+    assert commands.count(source_tests) == 1
+    assert commands.count(clean_dist) == 1
+    assert commands.count(build) == 1
+    assert commands.count(twine_check) == 1
+    assert commands.count(artifact_tests) == 1
+    positions = [
+        commands.index(command)
+        for command in (source_tests, clean_dist, build, twine_check, artifact_tests)
+    ]
+    assert positions == sorted(positions)
 
 
 def test_publish_workflow_is_tag_only_yaml() -> None:
@@ -48,10 +75,11 @@ def test_publish_workflow_tests_and_uploads_exact_build_artifacts() -> None:
         assert f"uses: {action}" in text
 
     required_commands = (
+        'python -m pytest tests/ -v -m "not artifact"',
+        "python -c \"import shutil; shutil.rmtree('dist', ignore_errors=True)\"",
         "python -m build",
         "python -m twine check dist/*",
-        "python -m pytest tests/ -v",
-        "python -m pytest tests/test_package_metadata.py -v",
+        "python -m pytest tests/ -v -m artifact",
     )
     positions = [text.index(command) for command in required_commands]
     assert positions == sorted(positions)
@@ -59,6 +87,16 @@ def test_publish_workflow_tests_and_uploads_exact_build_artifacts() -> None:
     assert "          name: python-package-distributions" in text
     assert "          path: dist/" in text
     assert text.count("          path: dist/") == 2
+
+
+def test_publish_workflow_runs_source_tests_before_build_and_artifact_tests_after() -> (
+    None
+):
+    _assert_staged_tests(_workflow_text())
+
+
+def test_ci_workflow_runs_source_tests_before_build_and_artifact_tests_after() -> None:
+    _assert_staged_tests(_workflow_text(CI_WORKFLOW))
 
 
 def test_publish_workflow_checks_tag_against_project_version_before_build() -> None:

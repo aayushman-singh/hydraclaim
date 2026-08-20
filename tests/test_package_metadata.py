@@ -4,6 +4,7 @@ import tomllib
 import zipfile
 
 import hydraclaim
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,6 +29,15 @@ def test_project_metadata_is_complete() -> None:
     assert project["requires-python"] == ">=3.11"
     assert "Programming Language :: Python :: 3.12" in project["classifiers"]
     assert "Programming Language :: Python :: 3.13" in project["classifiers"]
+
+
+def test_artifact_marker_is_explicitly_declared() -> None:
+    metadata = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+
+    assert (
+        "artifact: tests that inspect built wheel or source archive"
+        in metadata["tool"]["pytest"]["ini_options"]["markers"]
+    )
 
 
 def test_readme_uses_installed_command() -> None:
@@ -158,6 +168,7 @@ def test_distribution_includes_schema_resource() -> None:
     assert (ROOT / "hydraclaim" / "schema.cypher").is_file()
 
 
+@pytest.mark.artifact
 def test_release_archives_exclude_local_and_generated_content() -> None:
     dist_dir = ROOT / "dist"
     expected_names = {

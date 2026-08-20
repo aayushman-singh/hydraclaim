@@ -43,6 +43,11 @@ Demo = "https://hydraclaim.vercel.app"
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
 
+[tool.pytest.ini_options]
+markers = [
+    "artifact: tests that inspect built wheel or source archive",
+]
+
 [project.scripts]
 hydraclaim = "hydraclaim.cli:main"
 
