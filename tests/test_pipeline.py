@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
-from hydraclaim import pipeline
+from hydraclaim import cli, config, pipeline
 from hydraclaim.extract import parse_claims
+from hydraclaim.errors import PipelineInputError
 
 
 class _RecordingDB:
@@ -76,3 +79,55 @@ def test_malformed_extraction_stops_pipeline_before_any_write(monkeypatch, respo
         pipeline.run_pipeline(db, _document())
 
     assert db.writes == []
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        None,
+        [],
+        {},
+        {"scenario_id": "scenario", "entities": "wrong", "sessions": []},
+        {"scenario_id": "scenario", "entities": [{}], "sessions": []},
+        {"scenario_id": "scenario", "entities": [], "sessions": ["wrong"]},
+        {
+            "scenario_id": "scenario",
+            "entities": [],
+            "sessions": [{"session_id": "s1", "messages": "wrong"}],
+        },
+        {"scenario_id": "scenario", "entities": [], "sessions": [{}]},
+        {
+            "scenario_id": "scenario",
+            "entities": [],
+            "sessions": [{"session_id": "s1", "messages": [{}]}],
+        },
+    ],
+)
+def test_pipeline_rejects_malformed_document_before_db_access(document):
+    db = _RecordingDB()
+
+    with pytest.raises(PipelineInputError, match="invalid pipeline document"):
+        pipeline.run_pipeline(db, document)
+
+    assert db.reads == []
+    assert db.writes == []
+
+
+def test_unified_cli_reports_malformed_pipeline_document_without_connecting(
+    monkeypatch, tmp_path, capsys
+):
+    scenario_path = tmp_path / "malformed.json"
+    scenario_path.write_text(json.dumps({"scenario_id": "missing-fields"}))
+    monkeypatch.setattr(config, "require_settings", lambda **kwargs: None)
+    monkeypatch.setattr(
+        config,
+        "connect",
+        lambda: pytest.fail("pipeline connected before validating its document"),
+    )
+
+    assert cli.main(["pipeline", str(scenario_path)]) == 1
+
+    stderr = capsys.readouterr().err
+    assert "hydraclaim: error: validation_error:" in stderr
+    assert "invalid pipeline document" in stderr
+    assert "Traceback" not in stderr

@@ -17,9 +17,89 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from hydraclaim.db import HydraDB
+from hydraclaim.errors import PipelineInputError
 from hydraclaim.extract import extract_session
 from hydraclaim.graph_write import GraphWriter
 from hydraclaim.reconcile import plan_writes
+from hydraclaim.claims import SOURCE_KINDS
+
+
+def _required_string(value: object, path: str, errors: list[str]) -> None:
+    if not isinstance(value, str) or not value.strip():
+        errors.append(f"{path} must be a non-empty string")
+
+
+def validate_pipeline_document(document: object) -> dict:
+    """Validate the session document before any pipeline field access."""
+    if not isinstance(document, dict):
+        raise PipelineInputError("invalid pipeline document: root must be an object")
+
+    errors: list[str] = []
+    _required_string(document.get("scenario_id"), "scenario_id", errors)
+
+    entities = document.get("entities")
+    if not isinstance(entities, list):
+        errors.append("entities must be a list")
+    else:
+        for index, entity in enumerate(entities):
+            path = f"entities[{index}]"
+            if not isinstance(entity, dict):
+                errors.append(f"{path} must be an object")
+                continue
+            _required_string(entity.get("name"), f"{path}.name", errors)
+            if "type" in entity and not isinstance(entity["type"], str):
+                errors.append(f"{path}.type must be a string")
+            aliases = entity.get("aliases", [])
+            if not isinstance(aliases, list) or any(
+                not isinstance(alias, str) for alias in aliases
+            ):
+                errors.append(f"{path}.aliases must be a list of strings")
+
+    sessions = document.get("sessions")
+    if not isinstance(sessions, list):
+        errors.append("sessions must be a list")
+    else:
+        message_fields = (
+            "msg_id",
+            "ts",
+            "author",
+            "source_kind",
+            "channel",
+            "text",
+        )
+        for session_index, session in enumerate(sessions):
+            session_path = f"sessions[{session_index}]"
+            if not isinstance(session, dict):
+                errors.append(f"{session_path} must be an object")
+                continue
+            _required_string(
+                session.get("session_id"), f"{session_path}.session_id", errors
+            )
+            messages = session.get("messages")
+            if not isinstance(messages, list):
+                errors.append(f"{session_path}.messages must be a list")
+                continue
+            for message_index, message in enumerate(messages):
+                message_path = f"{session_path}.messages[{message_index}]"
+                if not isinstance(message, dict):
+                    errors.append(f"{message_path} must be an object")
+                    continue
+                for field in message_fields:
+                    _required_string(
+                        message.get(field), f"{message_path}.{field}", errors
+                    )
+                if (
+                    "source_kind" in message
+                    and message.get("source_kind") not in SOURCE_KINDS
+                ):
+                    errors.append(
+                        f"{message_path}.source_kind is not supported: "
+                        f"{message.get('source_kind')!r}"
+                    )
+
+    if errors:
+        raise PipelineInputError("invalid pipeline document: " + "; ".join(errors))
+    return document
 
 
 def fetch_active_claims(db: HydraDB) -> list[dict]:
@@ -47,6 +127,7 @@ def run_pipeline(
     doc: dict,
     step_hook: Callable[..., None] | None = None,
 ) -> dict:
+    doc = validate_pipeline_document(doc)
     scen = doc["scenario_id"]
     stats = {
         "scenario": scen,
@@ -139,11 +220,15 @@ def main(argv: Sequence[str] | None = None) -> int | None:
 
     config.require_settings(hydradb=True, llm=True)
 
+    documents = []
+    for path in args.scenarios:
+        doc = json.loads(Path(path).read_text(encoding="utf-8"))
+        documents.append(validate_pipeline_document(doc))
+
     from hydraclaim.config import connect
 
     with connect() as db:
-        for path in args.scenarios:
-            doc = json.loads(Path(path).read_text(encoding="utf-8"))
+        for doc in documents:
             print(f"== {doc['scenario_id']} ==")
             run_pipeline(db, doc)
 

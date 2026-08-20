@@ -9,3 +9,7 @@ class GraphIntegrityError(ValueError):
 
 class ValidationError(ValueError):
     """Raised when an input does not satisfy a public data contract."""
+
+
+class PipelineInputError(ValidationError):
+    """Raised when a pipeline document does not match the session contract."""
