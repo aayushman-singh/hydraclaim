@@ -175,7 +175,7 @@ def test_rejects_malformed_extraction_root(response):
 def test_rejects_missing_unknown_or_invalid_claim_fields(change):
     response = _single({})
     change(response["claims"][0])
-    with pytest.raises(ValueError, match="claim\[0\]"):
+    with pytest.raises(ValueError, match=r"claim\[0\]"):
         parse_claims(response, SESSION)
 
 
