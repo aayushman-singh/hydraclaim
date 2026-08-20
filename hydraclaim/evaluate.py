@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Sequence
 from pathlib import Path
 
 from hydraclaim.reconcile import canonicalize_entity, normalize_value
@@ -132,11 +133,11 @@ def evaluate(
     }
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(prog="hydraclaim.evaluate")
+def main(argv: Sequence[str] | None = None) -> int | None:
+    parser = argparse.ArgumentParser(prog="hydraclaim evaluate")
     parser.add_argument("scenario", help="scenario JSON (ground truth)")
     parser.add_argument("drafts", help="drafts JSON from hydraclaim.extract --emit")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     doc = json.loads(Path(args.scenario).read_text(encoding="utf-8"))
     drafts = json.loads(Path(args.drafts).read_text(encoding="utf-8"))["drafts"]
@@ -167,4 +168,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

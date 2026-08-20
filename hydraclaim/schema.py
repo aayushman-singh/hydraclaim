@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import uuid
+from collections.abc import Sequence
 
 from hydraclaim.db import HydraDB, HydraDBError
 
@@ -220,14 +221,14 @@ def verify(db: HydraDB) -> bool:
     return all_ok
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(prog="hydraclaim.schema")
+def main(argv: Sequence[str] | None = None) -> int | None:
+    parser = argparse.ArgumentParser(prog="hydraclaim schema")
     parser.add_argument(
         "--verify",
         action="store_true",
         help="probe a live HydraDB node for the features HydraClaim needs",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if not args.verify:
         parser.print_help()
         return
@@ -240,4 +241,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

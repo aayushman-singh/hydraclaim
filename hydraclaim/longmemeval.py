@@ -14,6 +14,7 @@ import argparse
 import json
 import random
 import re
+from collections.abc import Sequence
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 
@@ -185,8 +186,8 @@ def _convert_command(args: argparse.Namespace) -> None:
         print(f"  {qtype}: {counts[qtype]}")
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(prog="hydraclaim.longmemeval")
+def main(argv: Sequence[str] | None = None) -> int | None:
+    parser = argparse.ArgumentParser(prog="hydraclaim longmemeval")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     convert_parser = subparsers.add_parser(
@@ -214,9 +215,9 @@ def main() -> None:
     )
     convert_parser.set_defaults(func=_convert_command)
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     args.func(args)
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

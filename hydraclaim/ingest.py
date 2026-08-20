@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Sequence
 from pathlib import Path
 
 from hydraclaim.db import HydraDB
@@ -26,10 +27,10 @@ def ingest_document(db: HydraDB, doc: dict) -> dict:
     return GraphWriter(db).ingest_document(doc)
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(prog="hydraclaim.ingest")
+def main(argv: Sequence[str] | None = None) -> int | None:
+    parser = argparse.ArgumentParser(prog="hydraclaim ingest")
     parser.add_argument("documents", nargs="+", help="scenario JSON files to ingest")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     from hydraclaim.config import connect
 
@@ -40,4 +41,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

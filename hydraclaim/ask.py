@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Sequence
 
 
 def _llm_classifier(question: str) -> dict:
@@ -41,8 +42,8 @@ def _print_result(result: dict, verbose: bool) -> None:
         )
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(prog="hydraclaim.ask")
+def main(argv: Sequence[str] | None = None) -> int | None:
+    parser = argparse.ArgumentParser(prog="hydraclaim ask")
     parser.add_argument(
         "question", nargs="?", help="natural-language question (required unless --repl)"
     )
@@ -58,7 +59,7 @@ def main() -> None:
     parser.add_argument(
         "--repl", action="store_true", help="read questions from stdin in a loop"
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     classification_mode = "llm" if args.llm else "heuristic"
     llm_fn = _llm_classifier if args.llm else None
@@ -98,4 +99,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

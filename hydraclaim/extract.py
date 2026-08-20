@@ -21,6 +21,7 @@ import json
 import math
 import re
 import sys
+from collections.abc import Sequence
 from datetime import date, datetime
 from pathlib import Path
 
@@ -303,11 +304,11 @@ def _update_active(active: list[dict], drafts: list[dict]) -> list[dict]:
     return kept
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(prog="hydraclaim.extract")
+def main(argv: Sequence[str] | None = None) -> int | None:
+    parser = argparse.ArgumentParser(prog="hydraclaim extract")
     parser.add_argument("scenario", help="scenario JSON file (sessions + entities)")
     parser.add_argument("--emit", metavar="OUT_JSON", help="write drafts to this file")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     doc = json.loads(Path(args.scenario).read_text(encoding="utf-8"))
     scen = doc["scenario_id"]
@@ -335,4 +336,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

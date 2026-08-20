@@ -13,7 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from hydraclaim.db import HydraDB
@@ -119,10 +119,10 @@ def run_pipeline(
     return stats
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(prog="hydraclaim.pipeline")
+def main(argv: Sequence[str] | None = None) -> int | None:
+    parser = argparse.ArgumentParser(prog="hydraclaim pipeline")
     parser.add_argument("scenarios", nargs="+", help="scenario JSON files")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     from hydraclaim.config import connect
 
@@ -134,4 +134,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

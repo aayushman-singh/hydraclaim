@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import sys
+from collections.abc import Sequence
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -565,8 +566,8 @@ class DemoHandler(BaseHTTPRequestHandler):
         pass  # quiet: access logging goes to the service manager's journal
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(prog="hydraclaim.serve")
+def main(argv: Sequence[str] | None = None) -> int | None:
+    parser = argparse.ArgumentParser(prog="hydraclaim serve")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument(
@@ -575,7 +576,7 @@ def main() -> None:
         help="use the LLM for question classification "
         "(requires LLM_API_KEY); default is the keyword heuristic",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     from hydraclaim.config import connect
 
@@ -599,4 +600,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

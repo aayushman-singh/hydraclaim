@@ -13,6 +13,7 @@ import glob
 import json
 import string
 import time
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -322,8 +323,8 @@ def _expand_paths(patterns: list[str]) -> list[Path]:
     return sorted(set(paths))
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(prog="hydraclaim.benchmark")
+def main(argv: Sequence[str] | None = None) -> int | None:
+    parser = argparse.ArgumentParser(prog="hydraclaim benchmark")
     parser.add_argument("scenarios", nargs="+", help="scenario JSON files or globs")
     parser.add_argument(
         "--arm",
@@ -331,7 +332,7 @@ def main() -> None:
         default="all",
         help="benchmark arm to run",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     scenario_paths = _expand_paths(args.scenarios)
     scenarios = [json.loads(p.read_text(encoding="utf-8")) for p in scenario_paths]
@@ -363,4 +364,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
