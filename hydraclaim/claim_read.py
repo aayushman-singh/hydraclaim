@@ -608,7 +608,7 @@ LIMIT {int(scope.limit) + 1}"""
                 return AnswerResult(
                     route,
                     build_temporal_answer(_claim_dict(current), _claim_dict(previous)),
-                    (_citation(previous),),
+                    (_citation(current), _citation(previous)),
                     classification,
                     probe_result,
                 )

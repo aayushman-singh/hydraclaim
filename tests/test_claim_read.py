@@ -493,7 +493,10 @@ def test_equal_timestamp_temporal_result_uses_stable_history_order():
     )
 
     assert "was 2026-10-01" in result.text
-    assert result.citations[0].claim_id == "claim-1"
+    assert [citation.claim_id for citation in result.citations] == [
+        "claim-2",
+        "claim-1",
+    ]
 
 
 def test_equal_timestamp_conflict_citations_use_stable_claim_order():

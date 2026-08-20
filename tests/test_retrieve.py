@@ -98,6 +98,10 @@ def test_temporal_question_uses_previous_claim():
     result = answer(db, "What was the launch deadline before the most recent change?")
     assert "was 2026-10-10" in result["answer"]
     assert "2026-10-17" not in result["answer"]
+    assert [citation["claim_id"] for citation in result["citations"]] == [
+        "dl-3",
+        "dl-2",
+    ]
 
 
 def test_temporal_fallback_uses_chain_answer():
