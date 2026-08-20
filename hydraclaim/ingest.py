@@ -28,9 +28,22 @@ def ingest_document(db: HydraDB, doc: dict) -> dict:
 
 
 def main(argv: Sequence[str] | None = None) -> int | None:
-    parser = argparse.ArgumentParser(prog="hydraclaim ingest")
+    from hydraclaim.config import command_epilog
+
+    parser = argparse.ArgumentParser(
+        prog="hydraclaim ingest",
+        epilog=command_epilog(hydradb=True),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("documents", nargs="+", help="scenario JSON files to ingest")
     args = parser.parse_args(argv)
+
+    from hydraclaim import config
+
+    try:
+        config.require_settings(hydradb=True)
+    except config.ConfigurationError as exc:
+        parser.error(str(exc))
 
     from hydraclaim.config import connect
 

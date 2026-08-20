@@ -305,10 +305,23 @@ def _update_active(active: list[dict], drafts: list[dict]) -> list[dict]:
 
 
 def main(argv: Sequence[str] | None = None) -> int | None:
-    parser = argparse.ArgumentParser(prog="hydraclaim extract")
+    from hydraclaim.config import command_epilog
+
+    parser = argparse.ArgumentParser(
+        prog="hydraclaim extract",
+        epilog=command_epilog(llm="required"),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("scenario", help="scenario JSON file (sessions + entities)")
     parser.add_argument("--emit", metavar="OUT_JSON", help="write drafts to this file")
     args = parser.parse_args(argv)
+
+    from hydraclaim import config
+
+    try:
+        config.require_settings(llm=True)
+    except config.ConfigurationError as exc:
+        parser.error(str(exc))
 
     doc = json.loads(Path(args.scenario).read_text(encoding="utf-8"))
     scen = doc["scenario_id"]

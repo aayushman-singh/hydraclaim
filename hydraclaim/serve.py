@@ -567,7 +567,13 @@ class DemoHandler(BaseHTTPRequestHandler):
 
 
 def main(argv: Sequence[str] | None = None) -> int | None:
-    parser = argparse.ArgumentParser(prog="hydraclaim serve")
+    from hydraclaim.config import command_epilog
+
+    parser = argparse.ArgumentParser(
+        prog="hydraclaim serve",
+        epilog=command_epilog(hydradb=True, llm="optional"),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument(
@@ -577,6 +583,13 @@ def main(argv: Sequence[str] | None = None) -> int | None:
         "(requires LLM_API_KEY); default is the keyword heuristic",
     )
     args = parser.parse_args(argv)
+
+    from hydraclaim import config
+
+    try:
+        config.require_settings(hydradb=True, llm=args.llm)
+    except config.ConfigurationError as exc:
+        parser.error(str(exc))
 
     from hydraclaim.config import connect
 

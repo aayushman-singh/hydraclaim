@@ -43,7 +43,13 @@ def _print_result(result: dict, verbose: bool) -> None:
 
 
 def main(argv: Sequence[str] | None = None) -> int | None:
-    parser = argparse.ArgumentParser(prog="hydraclaim ask")
+    from hydraclaim.config import command_epilog
+
+    parser = argparse.ArgumentParser(
+        prog="hydraclaim ask",
+        epilog=command_epilog(hydradb=True, llm="optional"),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument(
         "question", nargs="?", help="natural-language question (required unless --repl)"
     )
@@ -63,6 +69,13 @@ def main(argv: Sequence[str] | None = None) -> int | None:
 
     classification_mode = "llm" if args.llm else "heuristic"
     llm_fn = _llm_classifier if args.llm else None
+
+    from hydraclaim import config
+
+    try:
+        config.require_settings(hydradb=True, llm=args.llm)
+    except config.ConfigurationError as exc:
+        parser.error(str(exc))
 
     from hydraclaim.config import connect
     from hydraclaim.retrieve import answer

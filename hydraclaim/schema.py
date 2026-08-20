@@ -222,7 +222,13 @@ def verify(db: HydraDB) -> bool:
 
 
 def main(argv: Sequence[str] | None = None) -> int | None:
-    parser = argparse.ArgumentParser(prog="hydraclaim schema")
+    from hydraclaim.config import command_epilog
+
+    parser = argparse.ArgumentParser(
+        prog="hydraclaim schema",
+        epilog=command_epilog(hydradb=True),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument(
         "--verify",
         action="store_true",
@@ -232,6 +238,13 @@ def main(argv: Sequence[str] | None = None) -> int | None:
     if not args.verify:
         parser.print_help()
         return
+
+    from hydraclaim import config
+
+    try:
+        config.require_settings(hydradb=True)
+    except config.ConfigurationError as exc:
+        parser.error(str(exc))
 
     from hydraclaim.config import connect
 

@@ -97,10 +97,16 @@ The API sends `Access-Control-Allow-Origin: *`, so a plain site works.
 ### Ask a question from the CLI
 
 ```bash
-# Question classification uses DeepSeek when LLM_API_KEY is set
-# (LLM_BASE_URL / LLM_MODEL are optional); otherwise a keyword heuristic routes.
+# Question classification uses the keyword heuristic by default.
 hydraclaim ask "What is the current launch deadline?" --verbose
+
+# LLM classification is explicit. Set the key and pass --llm.
+export LLM_API_KEY="your-key"
+hydraclaim ask --llm "What is the current launch deadline?" --verbose
 ```
+
+LLM_API_KEY alone never changes mode. LLM_BASE_URL and LLM_MODEL are
+optional LLM settings.
 
 ### Use the extraction pipeline
 
@@ -154,7 +160,8 @@ python -m pytest tests/
 
 **Two-stage routing:**
 
-1. **Classify** (one LLM call) — extract subject, predicate, time scope, question type.
+1. **Classify** (heuristic by default, one LLM call with `--llm`) — extract
+   subject, predicate, time scope, question type.
 2. **Graph probe** (2–3 bounded Cypher queries, no LLM) — measure coverage, conflicts, supersession depth.
 
 | Probe result | Route |

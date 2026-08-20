@@ -21,6 +21,64 @@ COMMAND_NAMES = (
 )
 
 
+COMMAND_SETTINGS = {
+    "ask": (
+        "HYDRADB_URL",
+        "HYDRADB_TOKEN",
+        "HYDRADB_NAMESPACE",
+        "HYDRADB_GRAPH",
+        "HYDRADB_CELL",
+        "LLM_API_KEY",
+        "LLM_BASE_URL",
+        "LLM_MODEL",
+        "--llm",
+    ),
+    "serve": (
+        "HYDRADB_URL",
+        "HYDRADB_TOKEN",
+        "HYDRADB_NAMESPACE",
+        "HYDRADB_GRAPH",
+        "HYDRADB_CELL",
+        "LLM_API_KEY",
+        "LLM_BASE_URL",
+        "LLM_MODEL",
+        "--llm",
+    ),
+    "schema": (
+        "HYDRADB_URL",
+        "HYDRADB_TOKEN",
+        "HYDRADB_NAMESPACE",
+        "HYDRADB_GRAPH",
+        "HYDRADB_CELL",
+    ),
+    "ingest": (
+        "HYDRADB_URL",
+        "HYDRADB_TOKEN",
+        "HYDRADB_NAMESPACE",
+        "HYDRADB_GRAPH",
+        "HYDRADB_CELL",
+    ),
+    "extract": ("LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL"),
+    "pipeline": (
+        "HYDRADB_URL",
+        "HYDRADB_TOKEN",
+        "HYDRADB_NAMESPACE",
+        "HYDRADB_GRAPH",
+        "HYDRADB_CELL",
+        "LLM_API_KEY",
+        "LLM_BASE_URL",
+        "LLM_MODEL",
+    ),
+    "benchmark": (
+        "HYDRADB_URL",
+        "HYDRADB_TOKEN",
+        "HYDRADB_NAMESPACE",
+        "HYDRADB_GRAPH",
+        "HYDRADB_CELL",
+    ),
+}
+
+
 def test_dispatcher_has_exactly_the_public_commands() -> None:
     assert tuple(COMMANDS) == COMMAND_NAMES
     assert len(COMMANDS) == 10
@@ -44,6 +102,30 @@ def test_subcommand_help(command: str) -> None:
     with pytest.raises(SystemExit) as exc:
         main([command, "--help"])
     assert exc.value.code == 0
+
+
+@pytest.mark.parametrize("command,settings", COMMAND_SETTINGS.items())
+def test_external_command_help_names_required_settings(
+    command: str, settings: tuple[str, ...], capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as exc:
+        main([command, "--help"])
+
+    assert exc.value.code == 0
+    output = capsys.readouterr().out
+    for setting in settings:
+        assert setting in output
+
+
+def test_external_command_help_explains_explicit_llm_mode(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as exc:
+        main(["ask", "--help"])
+
+    assert exc.value.code == 0
+    output = capsys.readouterr().out
+    assert "LLM_API_KEY alone does not select LLM mode" in output
 
 
 def test_unknown_command_returns_usage_error(

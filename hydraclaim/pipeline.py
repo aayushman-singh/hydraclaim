@@ -120,9 +120,22 @@ def run_pipeline(
 
 
 def main(argv: Sequence[str] | None = None) -> int | None:
-    parser = argparse.ArgumentParser(prog="hydraclaim pipeline")
+    from hydraclaim.config import command_epilog
+
+    parser = argparse.ArgumentParser(
+        prog="hydraclaim pipeline",
+        epilog=command_epilog(hydradb=True, llm="required"),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("scenarios", nargs="+", help="scenario JSON files")
     args = parser.parse_args(argv)
+
+    from hydraclaim import config
+
+    try:
+        config.require_settings(hydradb=True, llm=True)
+    except config.ConfigurationError as exc:
+        parser.error(str(exc))
 
     from hydraclaim.config import connect
 

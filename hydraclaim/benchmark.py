@@ -324,7 +324,13 @@ def _expand_paths(patterns: list[str]) -> list[Path]:
 
 
 def main(argv: Sequence[str] | None = None) -> int | None:
-    parser = argparse.ArgumentParser(prog="hydraclaim benchmark")
+    from hydraclaim.config import command_epilog
+
+    parser = argparse.ArgumentParser(
+        prog="hydraclaim benchmark",
+        epilog=command_epilog(hydradb=True),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("scenarios", nargs="+", help="scenario JSON files or globs")
     parser.add_argument(
         "--arm",
@@ -333,6 +339,13 @@ def main(argv: Sequence[str] | None = None) -> int | None:
         help="benchmark arm to run",
     )
     args = parser.parse_args(argv)
+
+    from hydraclaim import config
+
+    try:
+        config.require_settings(hydradb=True)
+    except config.ConfigurationError as exc:
+        parser.error(str(exc))
 
     scenario_paths = _expand_paths(args.scenarios)
     scenarios = [json.loads(p.read_text(encoding="utf-8")) for p in scenario_paths]
