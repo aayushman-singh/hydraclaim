@@ -1,6 +1,7 @@
 $ErrorActionPreference = "Stop"
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+Set-Location -LiteralPath $repoRoot
 $distDir = Join-Path $repoRoot "dist"
 $buildDir = Join-Path $repoRoot "build"
 $hostPython = (Get-Command python -ErrorAction Stop).Source

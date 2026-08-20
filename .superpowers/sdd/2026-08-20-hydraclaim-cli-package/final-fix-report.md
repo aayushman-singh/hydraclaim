@@ -1,6 +1,6 @@
 # HydraClaim CLI package final fix report
 
-Date: 2026-08-20  
+Date: 2026-08-20
 Branch: `feat/hydraclaim-release`
 
 ## Status

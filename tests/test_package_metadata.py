@@ -51,6 +51,20 @@ def test_package_verifier_selects_only_the_release_wheel() -> None:
     ) in text
 
 
+def test_package_verifier_sets_repository_root_before_relative_commands() -> None:
+    text = (ROOT / "scripts" / "verify-package.ps1").read_text(encoding="utf-8")
+
+    root_resolution = '$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path'
+    set_location = "Set-Location -LiteralPath $repoRoot"
+
+    assert root_resolution in text
+    assert set_location in text
+    assert text.index(root_resolution) < text.index(set_location)
+    assert text.index(set_location) < text.index(
+        '$distDir = Join-Path $repoRoot "dist"'
+    )
+
+
 def test_project_declares_hatchling_and_explicit_package_inclusion() -> None:
     metadata = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
 
