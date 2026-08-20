@@ -1,6 +1,6 @@
 [project]
 name = "hydraclaim"
-version = "0.1.0"
+version = "0.2.0"
 description = "Conflict-aware temporal memory for AI agents, built on HydraDB."
 readme = "README.md"
 license = "MIT"
@@ -36,6 +36,9 @@ Demo = "https://hydraclaim.vercel.app"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+
+[project.scripts]
+hydraclaim = "hydraclaim.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["hydraclaim*"]
