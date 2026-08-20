@@ -144,6 +144,19 @@ hydraclaim events show source-event:slack:message-42
 attempt. Use `process --reprocess` to start a new attempt for an event that was
 already processed. Earlier attempts remain available through `events show`.
 
+### Future scope
+
+- Add a Model Context Protocol (MCP) server with two tools: one tool records a
+  source event, and one tool asks a supported question.
+- Connect Codex, Claude Code, Cursor, and other MCP clients to the same claim
+  graph.
+- Require explicit user setup before any transcript capture.
+- Use the current source-event status and inspection interfaces for MCP writes.
+- Keep claim support, conflict, supersession, provenance, and abstention rules
+  unchanged.
+- Measure end-to-end extraction and answer results on a fixed LongMemEval-S
+  sample.
+
 ### Run the tests
 
 ```bash
