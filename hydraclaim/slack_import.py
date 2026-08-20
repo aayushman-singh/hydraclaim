@@ -40,12 +40,16 @@ def _author_name(msg: dict) -> str:
 
 
 def _msg_timestamp(msg: dict) -> str:
-    """Parse Slack's ``ts`` field and return an ISO-8601 timestamp."""
+    """Validate and normalize Slack's ``ts`` field."""
     raw = msg.get("ts")
+    if not isinstance(raw, str) or not raw.strip():
+        raise ValueError(f"invalid Slack timestamp: {raw!r}")
+    timestamp = raw.strip()
     try:
-        return datetime.fromtimestamp(float(raw), tz=timezone.utc).isoformat()
+        datetime.fromtimestamp(float(timestamp), tz=timezone.utc)
     except (ValueError, TypeError, OSError, OverflowError) as exc:
         raise ValueError(f"invalid Slack timestamp: {raw!r}") from exc
+    return timestamp
 
 
 def parse_slack_export(
@@ -60,21 +64,21 @@ def parse_slack_export(
     by_day: dict[str, list[dict]] = defaultdict(list)
 
     for msg in messages:
+        timestamp = _msg_timestamp(msg)
         if msg.get("subtype") in ("channel_join", "channel_leave", "bot_message"):
             continue
         text = msg.get("text", "")
         if not text or not text.strip():
             continue
 
-        timestamp = _msg_timestamp(msg)
-        dt = datetime.fromisoformat(timestamp)
+        dt = datetime.fromtimestamp(float(timestamp), tz=timezone.utc)
         day = dt.date().isoformat()
         author = _author_name(msg)
         clean_text = _strip_slack_formatting(text)
 
         by_day[day].append(
             {
-                "msg_id": f"slack-{channel}-{msg.get('ts', '0').replace('.', '-')}",
+                "msg_id": f"slack-{channel}-{timestamp.replace('.', '-')}",
                 "ts": dt.isoformat(),
                 "author": author,
                 "source_kind": "slack",

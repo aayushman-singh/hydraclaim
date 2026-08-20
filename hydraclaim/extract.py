@@ -229,15 +229,15 @@ def parse_claims(
                 f"{where}: quote not found verbatim in {msg['msg_id']}, dropped"
             )
             continue
+        raw_valid_from = raw.get("valid_from")
         try:
-            valid_from = date.fromisoformat(
-                str(raw.get("valid_from", ""))[:10]
-            ).isoformat()
-        except ValueError:
-            warnings.append(
-                f"{where}: bad valid_from {raw.get('valid_from')!r}, dropped"
-            )
-            continue
+            if not isinstance(raw_valid_from, str) or not re.fullmatch(
+                r"\d{4}-\d{2}-\d{2}", raw_valid_from
+            ):
+                raise ValueError
+            valid_from = date.fromisoformat(raw_valid_from).isoformat()
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"invalid valid_from date: {raw_valid_from!r}") from exc
         if not isinstance(raw.get("subject"), str) or not raw["subject"].strip():
             warnings.append(f"{where}: missing subject, dropped")
             continue

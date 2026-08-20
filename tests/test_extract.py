@@ -77,9 +77,19 @@ def test_reference_date_rejects_invalid_timestamp():
         _reference_date({"messages": [{"ts": "not-a-date"}]})
 
 
+def test_reference_date_rejects_missing_timestamp():
+    with pytest.raises(ValueError, match="session timestamp"):
+        _reference_date({"messages": [{}]})
+
+
 def test_parse_claims_rejects_unparseable_date_predicate_value():
     with pytest.raises(ValueError, match="deadline.*not-a-date"):
         parse_claims(_single({"value": "not-a-date"}), SESSION)
+
+
+def test_parse_claims_rejects_valid_from_suffix():
+    with pytest.raises(ValueError, match="valid_from.*2026-05-18T09:00:00"):
+        parse_claims(_single({"valid_from": "2026-05-18T09:00:00"}), SESSION)
 
 
 def test_build_messages_empty_active_claims():

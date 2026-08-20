@@ -16,6 +16,29 @@ def test_slack_timestamp_rejects_invalid_value():
         _msg_timestamp({"ts": "invalid"})
 
 
+def test_slack_timestamp_rejects_missing_value():
+    with pytest.raises(ValueError, match="Slack timestamp"):
+        _msg_timestamp({})
+
+
+@pytest.mark.parametrize("raw", [1716000000, True])
+def test_slack_timestamp_rejects_non_string_value(raw):
+    with pytest.raises(ValueError, match="Slack timestamp"):
+        _msg_timestamp({"ts": raw})
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        {"ts": "invalid", "text": ""},
+        {"ts": "invalid", "text": "joined", "subtype": "channel_join"},
+    ],
+)
+def test_parse_propagates_invalid_timestamp_before_skips(message):
+    with pytest.raises(ValueError, match="Slack timestamp"):
+        parse_slack_export([message])
+
+
 def test_strip_user_mention():
     assert (
         _strip_slack_formatting("Hey <@U1234|alice>, check this")
