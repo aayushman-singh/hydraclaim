@@ -1,7 +1,10 @@
 from pathlib import Path
+import tarfile
 import tomllib
+import zipfile
 
 import hydraclaim
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,12 +35,35 @@ def test_project_declares_hatchling_and_explicit_package_inclusion() -> None:
 def test_source_archive_excludes_tests_and_build_artifacts() -> None:
     metadata = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
 
-    assert metadata["tool"]["hatch"]["build"]["targets"]["sdist"]["exclude"] == [
+    exclusions = metadata["tool"]["hatch"]["build"]["targets"]["sdist"]["exclude"]
+    required_exclusions = {
         "/tests",
-        "/build",
-        "/dist",
-        "/.venv-package-test",
-    ]
+        "/hydradb-data/**",
+        "/.superpowers/**",
+        "/.claude/**",
+        "/.playwright-mcp/**",
+        "/docs/agents/**",
+        "/docs/superpowers/**",
+        "/AGENTS.md",
+        "/CONTEXT.md",
+        "/PLAN.md",
+        "/task-*-brief.md",
+        "/task-*-report.md",
+        "/data/sessions/**",
+        "/data/longmemeval/**",
+        "/results/**",
+        "/*.egg-info/**",
+        "/.env",
+        "/.env.*",
+        "/.pytest_cache/**",
+        "/.ruff_cache/**",
+        "/.worktrees/**",
+        "/build/**",
+        "/dist/**",
+        "/.venv/**",
+        "/.venv-package-test/**",
+    }
+    assert required_exclusions <= set(exclusions)
 
 
 def test_package_does_not_duplicate_project_version() -> None:
@@ -63,3 +89,77 @@ def test_distribution_selects_only_hydraclaim_packages() -> None:
 
 def test_distribution_includes_schema_resource() -> None:
     assert (ROOT / "hydraclaim" / "schema.cypher").is_file()
+
+
+def test_release_archives_exclude_local_and_generated_content() -> None:
+    wheel_path = next((ROOT / "dist").glob("*.whl"), None)
+    sdist_path = next((ROOT / "dist").glob("*.tar.gz"), None)
+    if wheel_path is None or sdist_path is None:
+        pytest.skip("build artifacts are not present")
+
+    with zipfile.ZipFile(wheel_path) as archive:
+        wheel_names = archive.namelist()
+    with tarfile.open(sdist_path) as archive:
+        sdist_names = archive.getnames()
+
+    forbidden = {
+        ".env",
+        ".env.local",
+        ".superpowers",
+        ".claude",
+        ".playwright-mcp",
+        ".worktrees",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".mypy_cache",
+        ".hypothesis",
+        ".cache",
+        ".tox",
+        ".nox",
+        "__pycache__",
+        "tests",
+        "build",
+        "dist",
+        ".venv",
+        ".venv-package-test",
+        "venv",
+        "env",
+        "hydradb-data",
+        "sessions",
+        "longmemeval",
+        "results",
+        "auth-token",
+    }
+
+    def forbidden_name(name: str) -> bool:
+        relative_name = name.split("/", 1)[-1]
+        parts = relative_name.split("/")
+        return (
+            any(
+                part in forbidden
+                or part.endswith(".egg-info")
+                or part.startswith(".env")
+                or part == "auth-token"
+                or part.endswith(".pyc")
+                for part in parts
+            )
+            or (
+                len(parts) >= 2
+                and parts[0] == "demo"
+                and (
+                    parts[-1].endswith((".mp4", ".png"))
+                    or parts[-1].endswith("-output.txt")
+                    or (parts[-1].startswith("thumb") and parts[-1].endswith(".jpg"))
+                )
+            )
+            or parts[-1] in {"AGENTS.md", "CONTEXT.md", "PLAN.md"}
+            or (
+                parts[-1].startswith("task-")
+                and parts[-1].endswith(("-brief.md", "-report.md"))
+            )
+        )
+
+    for archive_type, names in (("wheel", wheel_names), ("sdist", sdist_names)):
+        assert any(name.endswith("hydraclaim/cli.py") for name in names)
+        assert any(name.endswith("hydraclaim/schema.cypher") for name in names)
+        assert not [name for name in names if forbidden_name(name)], archive_type
