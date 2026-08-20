@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from hydraclaim import cli
 from hydraclaim.cli import COMMANDS, main
 
 
@@ -133,3 +134,52 @@ def test_unknown_command_returns_usage_error(
 ) -> None:
     assert main(["unknown"]) == 2
     assert "unknown command" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("error", "code"),
+    [
+        (cli.ConfigurationError("HYDRADB_URL is missing"), "configuration_error"),
+        (ValueError("invalid claim"), "validation_error"),
+        (FileNotFoundError("missing.json"), "file_error"),
+        (cli.HydraDBError("graph backend failed"), "graph_backend_failed"),
+        (cli.LLMError("language model failed"), "llm_failed"),
+        (cli.GraphIntegrityError("supersession cycle"), "graph_integrity_error"),
+        (cli.json.JSONDecodeError("bad JSON", "{}", 0), "invalid_json"),
+    ],
+)
+def test_installed_dispatch_maps_expected_failures(
+    monkeypatch, capsys, caplog, error, code
+):
+    class FailingCommand:
+        @staticmethod
+        def main(argv):
+            raise error
+
+    monkeypatch.setattr(cli.importlib, "import_module", lambda name: FailingCommand)
+    with caplog.at_level("ERROR", logger="hydraclaim.cli"):
+        assert main(["ask", "question"]) == 1
+    stderr = capsys.readouterr().err
+    assert f"hydraclaim: error: {code}:" in stderr
+    assert "Traceback" in caplog.text
+
+
+def test_installed_dispatch_does_not_hide_unexpected_programming_errors(monkeypatch):
+    class BrokenCommand:
+        @staticmethod
+        def main(argv):
+            raise RuntimeError("programming error")
+
+    monkeypatch.setattr(cli.importlib, "import_module", lambda name: BrokenCommand)
+    with pytest.raises(RuntimeError, match="programming error"):
+        main(["ask", "question"])
+
+
+def test_installed_dispatch_maps_module_configuration_failure(monkeypatch, capsys):
+    monkeypatch.setenv("HYDRADB_URL", "")
+    monkeypatch.setenv("HYDRADB_TOKEN", "")
+
+    assert main(["ask", "question"]) == 1
+    stderr = capsys.readouterr().err
+    assert "hydraclaim: error: configuration_error:" in stderr
+    assert "HYDRADB_URL" in stderr

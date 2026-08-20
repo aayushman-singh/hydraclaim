@@ -8,6 +8,7 @@ import pytest
 
 from hydraclaim import retrieve, serve
 from hydraclaim.claim_read import ClaimReadLimitError
+from hydraclaim.errors import GraphIntegrityError
 from hydraclaim.llm import LLMError
 
 
@@ -75,14 +76,19 @@ def test_dispatch_rejects_non_object_ask_body(body):
 
 
 def test_dispatch_ingest_route_returns_stable_failure(monkeypatch):
-    monkeypatch.setattr(serve, "WRITE_KEY", "")
+    monkeypatch.setattr(serve, "WRITE_KEY", "local-write-key")
     monkeypatch.setattr(
         "hydraclaim.ingest_api.handle_ingest",
         lambda body, db: (500, {"code": "ingest_failed", "error": "ingestion failed"}),
     )
 
     status, payload, extra = serve.dispatch(
-        "POST", "/ingest", {"text": "safe"}, FakeDB(), None
+        "POST",
+        "/ingest",
+        {"text": "safe"},
+        FakeDB(),
+        None,
+        {"authorization": "Bearer local-write-key"},
     )
 
     assert status == 500
@@ -91,13 +97,20 @@ def test_dispatch_ingest_route_returns_stable_failure(monkeypatch):
 
 
 def test_dispatch_slack_ingest_route_returns_stable_failure(monkeypatch):
-    monkeypatch.setattr(serve, "WRITE_KEY", "")
+    monkeypatch.setattr(serve, "WRITE_KEY", "local-write-key")
     monkeypatch.setattr(
         "hydraclaim.ingest_api.handle_ingest_slack",
         lambda body, db: (500, {"code": "ingest_failed", "error": "ingestion failed"}),
     )
 
-    status, payload, extra = serve.dispatch("POST", "/ingest/slack", [], FakeDB(), None)
+    status, payload, extra = serve.dispatch(
+        "POST",
+        "/ingest/slack",
+        [],
+        FakeDB(),
+        None,
+        {"authorization": "Bearer local-write-key"},
+    )
 
     assert status == 500
     assert payload == {"code": "ingest_failed", "error": "ingestion failed"}
@@ -214,6 +227,25 @@ def test_dispatch_maps_bare_claim_limit_for_ask(monkeypatch, caplog):
     assert "Traceback" in caplog.text
 
 
+def test_dispatch_maps_graph_integrity_for_ask(monkeypatch, caplog):
+    def broken(*args, **kwargs):
+        raise GraphIntegrityError("supersession cycle")
+
+    monkeypatch.setattr(serve, "handle_ask", broken)
+    with caplog.at_level("ERROR", logger="hydraclaim.serve"):
+        status, payload, _ = serve.dispatch(
+            "POST", "/ask", {"question": "Who owns payments?"}, FakeDB(), None
+        )
+
+    assert status == 409
+    assert payload == {
+        "code": "graph_integrity_error",
+        "error": "graph integrity error",
+    }
+    assert "exception_type=GraphIntegrityError" in caplog.text
+    assert "Traceback" in caplog.text
+
+
 def test_dispatch_maps_claim_limit_for_graph_and_logs_subject(monkeypatch, caplog):
     def broken(*args, **kwargs):
         raise ClaimReadLimitError(
@@ -277,12 +309,78 @@ def test_dispatch_does_not_hide_unrecognized_programming_errors(monkeypatch):
         )
 
 
-@pytest.mark.parametrize("response", [[], None])
+@pytest.mark.parametrize("response", [{"suggestions": []}, None])
 def test_llm_suggestions_fail_without_heuristic_fallback(monkeypatch, response):
     monkeypatch.setattr("hydraclaim.llm.chat_json", lambda messages: response)
 
-    with pytest.raises(serve.SuggestionResponseError, match="suggestion response"):
-        serve.handle_suggestions(object(), suggestion_mode="llm")
+    if response is None:
+        with pytest.raises(serve.SuggestionResponseError, match="suggestion response"):
+            serve.handle_suggestions(object(), suggestion_mode="llm")
+    else:
+        assert serve.handle_suggestions(object(), suggestion_mode="llm") == {
+            "suggestions": []
+        }
+
+
+def test_llm_suggestions_return_empty_without_heuristic_baseline(monkeypatch):
+    monkeypatch.setattr(
+        serve, "DATA_DIR", type("EmptyDir", (), {"glob": lambda *_: []})()
+    )
+    monkeypatch.setattr(
+        "hydraclaim.llm.chat_json", lambda messages: {"suggestions": []}
+    )
+
+    assert serve.handle_suggestions(object(), suggestion_mode="llm") == {
+        "suggestions": []
+    }
+
+
+@pytest.mark.parametrize(
+    ("raw", "status", "code"),
+    [
+        (None, 411, "content_length_required"),
+        ("abc", 400, "invalid_content_length"),
+        ("-1", 400, "invalid_content_length"),
+        ("500001", 413, "request_too_large"),
+    ],
+)
+def test_content_length_validation_is_bounded(raw, status, code):
+    result = serve.validate_content_length(raw)
+    assert result[0] == status
+    assert result[1]["code"] == code
+
+
+@pytest.mark.parametrize(
+    "raw, status",
+    [(None, 411), ("abc", 400), ("-1", 400), ("500001", 413)],
+)
+def test_handler_rejects_invalid_content_length_before_read(raw, status):
+    class ReadTracker:
+        def __init__(self):
+            self.calls = []
+
+        def read(self, length):
+            self.calls.append(length)
+            raise AssertionError("handler read an invalid request body")
+
+    class Server:
+        db = FakeDB()
+        llm_fn = None
+        classification_mode = "heuristic"
+        suggestion_mode = "heuristic"
+
+    handler = object.__new__(serve.DemoHandler)
+    handler.command = "POST"
+    handler.path = "/ask"
+    handler.headers = {} if raw is None else {"Content-Length": raw}
+    handler.rfile = ReadTracker()
+    handler.server = Server()
+    handler.client_address = ("127.0.0.1", 1234)
+
+    result = handler._dispatch()
+
+    assert result[0] == status
+    assert handler.rfile.calls == []
 
 
 def test_dispatch_maps_llm_suggestion_failure(monkeypatch, caplog):

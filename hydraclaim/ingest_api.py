@@ -19,8 +19,10 @@ from datetime import datetime, timezone
 from typing import Any
 
 from hydraclaim.claims import SOURCE_KINDS
-from hydraclaim.db import HydraDB
+from hydraclaim.db import HydraDB, HydraDBError
+from hydraclaim.errors import GraphIntegrityError
 from hydraclaim.extract import extract_session
+from hydraclaim.llm import LLMError
 from hydraclaim.pipeline import fetch_active_claims, run_pipeline
 from hydraclaim.reconcile import apply_plan, plan_writes
 from hydraclaim.slack_import import parse_slack_export
@@ -92,6 +94,19 @@ def _log_failure(context: _FailureContext, exc: Exception) -> None:
     )
 
 
+def _typed_failure(context: _FailureContext, exc: Exception) -> tuple[int, dict]:
+    _log_failure(context, exc)
+    if isinstance(exc, GraphIntegrityError):
+        return 409, {"code": "graph_integrity_error", "error": "graph integrity error"}
+    if isinstance(exc, HydraDBError):
+        return 502, {"code": "graph_backend_failed", "error": "graph backend failed"}
+    if isinstance(exc, LLMError):
+        return 502, {"code": "llm_failed", "error": "language model request failed"}
+    if isinstance(exc, ValueError):
+        return 400, {"code": "invalid_request", "error": "invalid ingestion input"}
+    return 500, {"code": "ingest_failed", "error": "ingestion failed"}
+
+
 def _discover_entities_llm(text: str) -> list[dict]:
     """Ask the LLM to extract entities from raw text."""
     from hydraclaim.llm import chat_json
@@ -110,10 +125,22 @@ def _discover_entities_llm(text: str) -> list[dict]:
         {"role": "user", "content": text},
     ]
     result = chat_json(messages)
-    entities = result.get("entities", []) if isinstance(result, dict) else []
-    for e in entities:
-        e.setdefault("type", "unknown")
-        e.setdefault("aliases", [])
+    if not isinstance(result, dict) or set(result) != {"entities"}:
+        raise ValueError("entity extraction response must be an object with entities")
+    entities = result["entities"]
+    if not isinstance(entities, list):
+        raise ValueError("entity extraction response entities must be a list")
+    for index, entity in enumerate(entities):
+        if not isinstance(entity, dict) or set(entity) != {"name", "type", "aliases"}:
+            raise ValueError(f"entity extraction item {index} has invalid fields")
+        if not isinstance(entity["name"], str) or not entity["name"].strip():
+            raise ValueError(f"entity extraction item {index} has invalid name")
+        if not isinstance(entity["type"], str) or not entity["type"].strip():
+            raise ValueError(f"entity extraction item {index} has invalid type")
+        if not isinstance(entity["aliases"], list) or any(
+            not isinstance(alias, str) for alias in entity["aliases"]
+        ):
+            raise ValueError(f"entity extraction item {index} has invalid aliases")
     return entities
 
 
@@ -161,15 +188,25 @@ def handle_ingest(body: dict, db: HydraDB) -> tuple[int, dict]:
                 "error": "missing 'text' in request body",
             }
 
-        source_kind = body.get("source_kind", "slack")
+        source_kind = body.get("source_kind")
         if source_kind not in SOURCE_KINDS:
             return 400, {
                 "code": "invalid_request",
                 "error": f"invalid source_kind: {source_kind!r}",
             }
 
-        author = body.get("author", "unknown")
-        channel = body.get("channel", "adhoc")
+        author = body.get("author")
+        if not isinstance(author, str) or not author.strip():
+            return 400, {
+                "code": "invalid_request",
+                "error": "missing 'author' in request body",
+            }
+        channel = body.get("channel")
+        if not isinstance(channel, str) or not channel.strip():
+            return 400, {
+                "code": "invalid_request",
+                "error": "missing 'channel' in request body",
+            }
         context.scenario_id = f"adhoc-{uuid.uuid4().hex[:8]}"
 
         context.mark("discover_entities", text_length=len(text))
@@ -209,8 +246,7 @@ def handle_ingest(body: dict, db: HydraDB) -> tuple[int, dict]:
             "warnings": warnings,
         }
     except Exception as exc:
-        _log_failure(context, exc)
-        return 500, {"code": "ingest_failed", "error": "ingestion failed"}
+        return _typed_failure(context, exc)
 
 
 def _ingest_preformatted(
@@ -329,8 +365,7 @@ def handle_ingest_slack(body: Any, db: HydraDB) -> tuple[int, dict]:
             "warnings": all_warnings,
         }
     except Exception as exc:
-        _log_failure(context, exc)
-        return 500, {"code": "ingest_failed", "error": "ingestion failed"}
+        return _typed_failure(context, exc)
 
 
 def _discover_entities_from_sessions(sessions: list[dict]) -> list[dict]:

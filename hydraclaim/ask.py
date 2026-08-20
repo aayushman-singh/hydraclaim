@@ -14,6 +14,8 @@ import argparse
 import json
 from collections.abc import Sequence
 
+from hydraclaim.errors import ValidationError
+
 
 def _llm_classifier(question: str) -> dict:
     from hydraclaim.router import llm_classifier
@@ -72,10 +74,7 @@ def main(argv: Sequence[str] | None = None) -> int | None:
 
     from hydraclaim import config
 
-    try:
-        config.require_settings(hydradb=True, llm=args.llm)
-    except config.ConfigurationError as exc:
-        parser.error(str(exc))
+    config.require_settings(hydradb=True, llm=args.llm)
 
     from hydraclaim.config import connect
     from hydraclaim.retrieve import answer
@@ -101,7 +100,7 @@ def main(argv: Sequence[str] | None = None) -> int | None:
         return
 
     if not args.question:
-        parser.error("question is required unless --repl is used")
+        raise ValidationError("question is required unless --repl is used")
 
     with connect() as db:
         result = answer(

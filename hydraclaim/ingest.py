@@ -40,10 +40,7 @@ def main(argv: Sequence[str] | None = None) -> int | None:
 
     from hydraclaim import config
 
-    try:
-        config.require_settings(hydradb=True)
-    except config.ConfigurationError as exc:
-        parser.error(str(exc))
+    config.require_settings(hydradb=True)
 
     from hydraclaim.config import connect
 

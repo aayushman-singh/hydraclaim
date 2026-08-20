@@ -16,13 +16,12 @@ def test_ask_reports_missing_hydradb_settings_before_connect(
 
     monkeypatch.setattr(config, "connect", fail_if_called)
 
-    with pytest.raises(SystemExit) as exc:
+    with pytest.raises(config.ConfigurationError) as exc:
         ask.main(["Who owns launch?"])
 
-    assert exc.value.code == 2
-    error = capsys.readouterr().err
-    assert "HYDRADB_URL" in error
-    assert "HYDRADB_TOKEN" in error
+    assert "HYDRADB_URL" in str(exc.value)
+    assert "HYDRADB_TOKEN" in str(exc.value)
+    assert capsys.readouterr().err == ""
 
 
 @pytest.mark.parametrize(
@@ -48,11 +47,11 @@ def test_hydradb_commands_fail_before_network_access(
 
     monkeypatch.setattr(config, "connect", fail_if_called)
 
-    with pytest.raises(SystemExit) as exc:
+    with pytest.raises(config.ConfigurationError) as exc:
         command.main(arguments)
 
-    assert exc.value.code == 2
-    assert "HYDRADB_URL" in capsys.readouterr().err
+    assert "HYDRADB_URL" in str(exc.value)
+    assert capsys.readouterr().err == ""
 
 
 def test_extract_reports_missing_llm_settings_before_file_read(
@@ -60,11 +59,11 @@ def test_extract_reports_missing_llm_settings_before_file_read(
 ) -> None:
     monkeypatch.delenv("LLM_API_KEY", raising=False)
 
-    with pytest.raises(SystemExit) as exc:
+    with pytest.raises(config.ConfigurationError) as exc:
         extract.main(["does-not-exist.json"])
 
-    assert exc.value.code == 2
-    assert "LLM_API_KEY" in capsys.readouterr().err
+    assert "LLM_API_KEY" in str(exc.value)
+    assert capsys.readouterr().err == ""
 
 
 def test_pipeline_reports_missing_llm_settings_before_connect(
@@ -77,8 +76,8 @@ def test_pipeline_reports_missing_llm_settings_before_connect(
 
     monkeypatch.setattr(config, "connect", fail_if_called)
 
-    with pytest.raises(SystemExit) as exc:
+    with pytest.raises(config.ConfigurationError) as exc:
         pipeline.main(["does-not-exist.json"])
 
-    assert exc.value.code == 2
-    assert "LLM_API_KEY" in capsys.readouterr().err
+    assert "LLM_API_KEY" in str(exc.value)
+    assert capsys.readouterr().err == ""

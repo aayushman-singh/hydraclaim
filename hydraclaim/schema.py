@@ -241,16 +241,13 @@ def main(argv: Sequence[str] | None = None) -> int | None:
 
     from hydraclaim import config
 
-    try:
-        config.require_settings(hydradb=True)
-    except config.ConfigurationError as exc:
-        parser.error(str(exc))
+    config.require_settings(hydradb=True)
 
     from hydraclaim.config import connect
 
     with connect() as db:
         ok = verify(db)
-    raise SystemExit(0 if ok else 1)
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":

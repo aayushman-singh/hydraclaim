@@ -342,10 +342,7 @@ def main(argv: Sequence[str] | None = None) -> int | None:
 
     from hydraclaim import config
 
-    try:
-        config.require_settings(hydradb=True)
-    except config.ConfigurationError as exc:
-        parser.error(str(exc))
+    config.require_settings(hydradb=True)
 
     scenario_paths = _expand_paths(args.scenarios)
     scenarios = [json.loads(p.read_text(encoding="utf-8")) for p in scenario_paths]

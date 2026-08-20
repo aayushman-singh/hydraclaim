@@ -13,10 +13,14 @@ class EmptyDB:
 
 
 def test_write_auth_no_key_configured(monkeypatch):
-    """When HYDRACLAIM_WRITE_KEY is empty, write endpoints are open."""
+    """When HYDRACLAIM_WRITE_KEY is empty, write endpoints fail closed."""
     monkeypatch.setattr(serve, "WRITE_KEY", "")
-    assert serve._check_write_auth({}) is None
-    assert serve._check_write_auth({"authorization": "Bearer whatever"}) is None
+    status, payload = serve._check_write_auth({})
+    assert status == 503
+    assert payload["code"] == "write_auth_not_configured"
+    status, payload = serve._check_write_auth({"authorization": "Bearer whatever"})
+    assert status == 503
+    assert payload["code"] == "write_auth_not_configured"
 
 
 def test_write_auth_rejects_missing_key(monkeypatch):
@@ -69,15 +73,17 @@ def test_ingest_slack_route_requires_auth(monkeypatch):
 
 
 def test_ingest_missing_text_returns_400(monkeypatch):
-    monkeypatch.setattr(serve, "WRITE_KEY", "")
+    monkeypatch.setattr(serve, "WRITE_KEY", "local-write-key")
     monkeypatch.setenv("LLM_API_KEY", "fake")
-    status, payload, extra = serve.dispatch("POST", "/ingest", {}, None, None)
+    status, payload, extra = serve.dispatch(
+        "POST", "/ingest", {}, None, None, {"authorization": "Bearer local-write-key"}
+    )
     assert status == 400
     assert "text" in payload["error"]
 
 
 def test_ingest_invalid_source_kind(monkeypatch):
-    monkeypatch.setattr(serve, "WRITE_KEY", "")
+    monkeypatch.setattr(serve, "WRITE_KEY", "local-write-key")
     monkeypatch.setenv("LLM_API_KEY", "fake")
     status, payload, extra = serve.dispatch(
         "POST",
@@ -85,6 +91,7 @@ def test_ingest_invalid_source_kind(monkeypatch):
         {"text": "hi", "source_kind": "twitter"},
         None,
         None,
+        {"authorization": "Bearer local-write-key"},
     )
     assert status == 400
     assert "source_kind" in payload["error"]
@@ -195,8 +202,8 @@ def test_preformatted_failure_logs_reconcile_state(caplog, monkeypatch):
     with caplog.at_level(logging.ERROR, logger="hydraclaim.ingest_api"):
         status, payload = ingest_api.handle_ingest(request, EmptyDB())
 
-    assert status == 500
-    assert payload["code"] == "ingest_failed"
+    assert status == 400
+    assert payload["code"] == "invalid_request"
     assert "step=reconcile" in caplog.text
     assert "draft_count=0" in caplog.text
     assert "exception_type=ValueError" in caplog.text
@@ -256,8 +263,8 @@ def test_preformatted_validation_failure_logs_validation_step(caplog, monkeypatc
     with caplog.at_level(logging.ERROR, logger="hydraclaim.ingest_api"):
         status, payload = ingest_api.handle_ingest(request, EmptyDB())
 
-    assert status == 500
-    assert payload["code"] == "ingest_failed"
+    assert status == 400
+    assert payload["code"] == "invalid_request"
     assert "step=validation" in caplog.text
     assert "exception_type=ValueError" in caplog.text
 
@@ -272,6 +279,7 @@ def test_slack_dict_failure_logs_message_count(caplog, monkeypatch):
     monkeypatch.setattr(ingest_api, "extract_session", raising_extractor)
     message = {
         "ts": "1716000000.000000",
+        "user": "U123",
         "user_name": "Ada",
         "text": "private source text",
     }
@@ -281,8 +289,8 @@ def test_slack_dict_failure_logs_message_count(caplog, monkeypatch):
             {"channel": "general", "messages": [message]}, EmptyDB()
         )
 
-    assert status == 500
-    assert payload == {"code": "ingest_failed", "error": "ingestion failed"}
+    assert status == 400
+    assert payload == {"code": "invalid_request", "error": "invalid ingestion input"}
     assert "step=extract" in caplog.text
     assert "message_count=1" in caplog.text
     assert "input_id=slack-dict" in caplog.text
@@ -300,6 +308,7 @@ def test_slack_bare_list_failure_logs_message_count_and_input_id(caplog, monkeyp
     messages = [
         {
             "ts": "1716000000.000000",
+            "user": "U123",
             "user_name": "Ada",
             "text": "bare list source text",
         }
@@ -308,8 +317,8 @@ def test_slack_bare_list_failure_logs_message_count_and_input_id(caplog, monkeyp
     with caplog.at_level(logging.ERROR, logger="hydraclaim.ingest_api"):
         status, payload = ingest_api.handle_ingest_slack(messages, EmptyDB())
 
-    assert status == 500
-    assert payload == {"code": "ingest_failed", "error": "ingestion failed"}
+    assert status == 400
+    assert payload == {"code": "invalid_request", "error": "invalid ingestion input"}
     assert "step=extract" in caplog.text
     assert "message_count=1" in caplog.text
     assert "input_id=slack-list" in caplog.text

@@ -22,6 +22,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import sys
 from collections.abc import Sequence
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -36,6 +37,7 @@ from hydraclaim.claim_read import (
     ClaimScope,
 )
 from hydraclaim.db import HydraDBError
+from hydraclaim.errors import GraphIntegrityError
 from hydraclaim.llm import LLMError
 from hydraclaim.ratelimit import limiter
 from hydraclaim.router import ClassificationError
@@ -197,7 +199,7 @@ def handle_suggestions(llm_fn, *, suggestion_mode: str = "heuristic") -> dict[st
         scenarios.append(doc)
 
     baseline = _build_suggestion_payload(scenarios)
-    if suggestion_mode == "heuristic" or not baseline["suggestions"]:
+    if suggestion_mode == "heuristic":
         return baseline
     if llm_fn is None:
         raise ValueError("llm suggestion mode requires llm_fn")
@@ -221,10 +223,10 @@ def handle_suggestions(llm_fn, *, suggestion_mode: str = "heuristic") -> dict[st
             f"suggestion response must be an object, got {type(result).__name__}"
         )
     suggestions = result.get("suggestions")
-    if not isinstance(suggestions, list) or not suggestions:
-        raise SuggestionResponseError(
-            "suggestion response must contain a non-empty list"
-        )
+    if not isinstance(suggestions, list):
+        raise SuggestionResponseError("suggestion response must contain a list")
+    if not suggestions:
+        return {"suggestions": []}
 
     seen: set[str] = set()
     deduped: list[dict[str, str]] = []
@@ -310,14 +312,33 @@ def handle_graph(db) -> dict[str, Any]:
 
 
 WRITE_KEY = os.environ.get("HYDRACLAIM_WRITE_KEY", "")
+MAX_BODY_BYTES = 500_000
+
+
+def validate_content_length(raw: str | None) -> int | tuple[int, dict[str, str]]:
+    """Validate a request length before the handler reads any body bytes."""
+    if raw is None:
+        return 411, _error("content_length_required", "Content-Length is required")
+    if not re.fullmatch(r"[0-9]+", raw):
+        return 400, _error("invalid_content_length", "Content-Length must be decimal")
+    try:
+        length = int(raw, 10)
+    except ValueError:
+        return 400, _error("invalid_content_length", "Content-Length is invalid")
+    if length > MAX_BODY_BYTES:
+        return 413, _error("request_too_large", "request body too large")
+    return length
 
 
 def _check_write_auth(headers: dict) -> tuple[int, dict] | None:
     """Return an error tuple if write auth fails, None if OK."""
-    if not WRITE_KEY:
-        return None
+    configured_key = os.environ.get("HYDRACLAIM_WRITE_KEY", WRITE_KEY)
+    if not configured_key:
+        return 503, _error(
+            "write_auth_not_configured", "write authentication is not configured"
+        )
     auth = headers.get("authorization", "")
-    if auth == f"Bearer {WRITE_KEY}":
+    if auth == f"Bearer {configured_key}":
         return None
     return 401, _error("unauthorized", "invalid or missing write key")
 
@@ -453,6 +474,13 @@ def dispatch(
                 _error("classifier_failed", "question classification failed"),
                 None,
             )
+        except GraphIntegrityError as exc:
+            _log_remote_failure(
+                "ask graph integrity",
+                _request_context(method, path, body, classification_mode),
+                exc,
+            )
+            return 409, _error("graph_integrity_error", "graph integrity error"), None
         except HydraDBError as exc:
             _log_remote_failure(
                 "ask graph backend",
@@ -477,6 +505,13 @@ def dispatch(
                 exc,
             )
             return 502, _error("graph_backend_failed", "graph backend failed"), None
+        except GraphIntegrityError as exc:
+            _log_remote_failure(
+                "graph integrity",
+                _request_context(method, path, body, classification_mode),
+                exc,
+            )
+            return 409, _error("graph_integrity_error", "graph integrity error"), None
     if method in ("POST",) and path in ("/ingest", "/ingest/slack"):
         auth_err = _check_write_auth(headers)
         if auth_err:
@@ -493,11 +528,59 @@ def dispatch(
                 )
             from hydraclaim.ingest_api import handle_ingest
 
-            status, payload = handle_ingest(body, db)
+            try:
+                status, payload = handle_ingest(body, db)
+            except GraphIntegrityError as exc:
+                _log_remote_failure(
+                    "ingest graph integrity",
+                    _request_context(method, path, body, "write"),
+                    exc,
+                )
+                return (
+                    409,
+                    _error("graph_integrity_error", "graph integrity error"),
+                    None,
+                )
+            except HydraDBError as exc:
+                _log_remote_failure(
+                    "ingest graph backend",
+                    _request_context(method, path, body, "write"),
+                    exc,
+                )
+                return 502, _error("graph_backend_failed", "graph backend failed"), None
+            except LLMError as exc:
+                _log_remote_failure(
+                    "ingest LLM",
+                    _request_context(method, path, body, "write"),
+                    exc,
+                )
+                return 502, _error("llm_failed", "language model request failed"), None
             return status, payload, None
         from hydraclaim.ingest_api import handle_ingest_slack
 
-        status, payload = handle_ingest_slack(body, db)
+        try:
+            status, payload = handle_ingest_slack(body, db)
+        except GraphIntegrityError as exc:
+            _log_remote_failure(
+                "slack ingest graph integrity",
+                _request_context(method, path, body, "write"),
+                exc,
+            )
+            return 409, _error("graph_integrity_error", "graph integrity error"), None
+        except HydraDBError as exc:
+            _log_remote_failure(
+                "slack ingest graph backend",
+                _request_context(method, path, body, "write"),
+                exc,
+            )
+            return 502, _error("graph_backend_failed", "graph backend failed"), None
+        except LLMError as exc:
+            _log_remote_failure(
+                "slack ingest LLM",
+                _request_context(method, path, body, "write"),
+                exc,
+            )
+            return 502, _error("llm_failed", "language model request failed"), None
         return status, payload, None
     return 404, _error("not_found", f"unknown endpoint: {method} {path}"), None
 
@@ -522,13 +605,12 @@ class DemoHandler(BaseHTTPRequestHandler):
         suggestion_mode = getattr(self.server, "suggestion_mode", "heuristic")
         try:
             if self.command == "POST":
-                length = int(self.headers.get("Content-Length") or 0)
-                if length > 500_000:  # hard cap on request bodies
-                    return (
-                        413,
-                        _error("request_too_large", "request body too large"),
-                        None,
-                    )
+                length_result = validate_content_length(
+                    self.headers.get("Content-Length")
+                )
+                if not isinstance(length_result, int):
+                    return length_result[0], length_result[1], None
+                length = length_result
                 body = json.loads(self.rfile.read(length) or b"{}")
             else:
                 body = {}
@@ -586,10 +668,7 @@ def main(argv: Sequence[str] | None = None) -> int | None:
 
     from hydraclaim import config
 
-    try:
-        config.require_settings(hydradb=True, llm=args.llm)
-    except config.ConfigurationError as exc:
-        parser.error(str(exc))
+    config.require_settings(hydradb=True, llm=args.llm)
 
     from hydraclaim.config import connect
 
