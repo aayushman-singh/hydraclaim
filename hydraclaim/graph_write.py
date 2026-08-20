@@ -396,7 +396,18 @@ def _validate_plan(plan: object, scenario_id: object, entities: object) -> list[
     return errors
 
 
-def _validate_relation_endpoints(db: Any, plan: dict) -> None:
+def _validate_relation_endpoints(
+    db: Any,
+    plan: dict,
+    proposed_metadata: dict[str, tuple[str, str]],
+) -> dict[str, tuple[str, str]]:
+    """Validate relation endpoints and replace drafts with stored semantics.
+
+    A replay can contain a claim id that already exists in the graph.  The
+    incoming draft is not authoritative for that id.  Read the stored claim
+    scope before relation validation so a replay cannot attach a relation to
+    a different subject or predicate.
+    """
     create_ids = {claim["id"] for claim in plan["create"]}
     references = (
         [("SUPERSEDES", edge["new_id"]) for edge in plan["supersede"]]
@@ -407,19 +418,29 @@ def _validate_relation_endpoints(db: Any, plan: dict) -> None:
 
     missing: list[str] = []
     checked: dict[str, bool] = {}
+    authoritative = dict(proposed_metadata)
     for relation, claim_id in references:
-        if claim_id in create_ids:
-            continue
         exists = checked.get(claim_id)
         if exists is None:
             exists = _node_exists(db, "Claim", claim_id)
             checked[claim_id] = exists
         if not exists:
-            missing.append(f"{relation} endpoint {claim_id!r}")
+            if claim_id not in create_ids:
+                missing.append(f"{relation} endpoint {claim_id!r}")
+            continue
+        stored_scope = _claim_metadata(db, claim_id)
+        draft_scope = proposed_metadata.get(claim_id)
+        if draft_scope is not None and draft_scope != stored_scope:
+            raise GraphIntegrityError(
+                f"existing Claim {claim_id!r} scope differs from the proposed "
+                f"scope: stored {stored_scope!r}, proposed {draft_scope!r}"
+            )
+        authoritative[claim_id] = stored_scope
     if missing:
         raise GraphIntegrityError(
             "invalid write plan: unknown Claim endpoint(s): " + ", ".join(missing)
         )
+    return authoritative
 
 
 def _claim_metadata(db: Any, claim_id: str) -> tuple[str, str]:
@@ -618,6 +639,14 @@ class GraphWriter:
             for claim_id in [f"{scenario_id}:{claim['key']}"]
             for other in claim.get("contradicts_with", [])
         ]
+        endpoint_plan = {
+            "create": [{"id": f"{scenario_id}:{claim['key']}"} for claim in claims],
+            "supersede": supersede_edges,
+            "contradict": contradict_edges,
+        }
+        claim_metadata = _validate_relation_endpoints(
+            self._db, endpoint_plan, claim_metadata
+        )
         _validate_contradiction_integrity(self._db, contradict_edges, claim_metadata)
 
         for claim in claims:
@@ -666,11 +695,11 @@ class GraphWriter:
         errors = _validate_plan(plan, scenario_id, entities)
         if errors:
             raise ValueError(f"invalid write plan for {scenario_id!r}: {errors}")
-        _validate_relation_endpoints(self._db, plan)
         claim_metadata = {
             draft["id"]: (draft["subject"], draft["predicate"])
             for draft in plan["create"]
         }
+        claim_metadata = _validate_relation_endpoints(self._db, plan, claim_metadata)
         _validate_supersession_integrity(self._db, plan["supersede"], claim_metadata)
         _validate_contradiction_integrity(self._db, plan["contradict"], claim_metadata)
 

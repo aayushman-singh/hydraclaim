@@ -314,6 +314,42 @@ def test_ingest_rejects_cross_slot_contradiction_before_any_write(subject, predi
     assert db.writes == []
 
 
+@pytest.mark.parametrize("relation", ["supersede", "contradict"])
+def test_ingest_rechecks_existing_claim_scope_for_relations(relation):
+    db = IntegrityDB(
+        claims={
+            "c1": {
+                "id": graph_id("scenario:c1"),
+                "subject": "project",
+                "predicate": "status",
+            },
+            "c2": {
+                "id": graph_id("scenario:c2"),
+                "subject": "project",
+                "predicate": "status",
+            },
+        }
+    )
+    first = _claim(key="c1", subject="person", predicate="status")
+    second = _claim(key="c2", subject="person", predicate="status")
+    if relation == "supersede":
+        second["supersedes"] = "c1"
+    else:
+        second["contradicts_with"] = ["c1"]
+    scenario = {
+        "scenario_id": "scenario",
+        "entities": [
+            {"name": "person", "type": "person", "aliases": []},
+        ],
+        "ground_truth": {"claims": [first, second], "qa": []},
+    }
+
+    with pytest.raises(GraphIntegrityError, match="existing Claim.*scope"):
+        GraphWriter(db).ingest_document(scenario)
+
+    assert db.writes == []
+
+
 def test_apply_plan_rejects_invalid_deadline_value_before_any_write():
     db = RecordingDB()
     plan = deepcopy(_plan())
@@ -553,6 +589,45 @@ def test_apply_plan_rejects_cross_scope_supersession_before_writes():
     plan = _integrity_plan([("new", "old")])
 
     with pytest.raises(GraphIntegrityError, match="same subject and predicate"):
+        GraphWriter(db).apply_plan(plan, "scenario")
+
+    assert db.writes == []
+
+
+@pytest.mark.parametrize("relation", ["supersede", "contradict"])
+def test_apply_plan_rechecks_existing_create_endpoint_scope(relation):
+    db = IntegrityDB(
+        claims={
+            "new": {
+                "id": graph_id("new"),
+                "subject": "project",
+                "predicate": "status",
+            },
+            "old": {
+                "id": graph_id("old"),
+                "subject": "project",
+                "predicate": "status",
+            },
+        }
+    )
+    plan = {
+        "create": [
+            _claim(id="new", subject="person", predicate="status"),
+            _claim(id="old", subject="person", predicate="status"),
+        ],
+        "supersede": (
+            [{"new_id": "new", "old_id": "old", "at": "2026-05-02"}]
+            if relation == "supersede"
+            else []
+        ),
+        "contradict": (
+            [{"a_id": "new", "b_id": "old"}] if relation == "contradict" else []
+        ),
+        "duplicates": 0,
+        "warnings": [],
+    }
+
+    with pytest.raises(GraphIntegrityError, match="existing Claim.*scope"):
         GraphWriter(db).apply_plan(plan, "scenario")
 
     assert db.writes == []
