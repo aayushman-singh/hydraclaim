@@ -63,18 +63,18 @@ WHERE c.predicate = 'deadline'
   AND (c.valid_to = '' OR c.valid_to > '2026-05-12')
 RETURN c.value, c.valid_from, c.valid_to;
 
-// 3. Supersession chain: chronology of an overwritten claim.
-//    HydraDB returns the matching pairs. Compute chain depth client-side
-//    from the directed pairs because the dialect has no path-length function.
-MATCH p = (newer:Claim)-[:SUPERSEDES*1..5]->(older:Claim)
-WHERE newer.predicate = 'deadline'
+// 3. Supersession chain: chronology of one selected claim.
+//    HydraDB returns matching pairs. Compute chain depth client-side
+//    because the dialect has no path-length function.
+MATCH (e:Entity {name: 'product launch'})<-[:ABOUT]-(newer:Claim {id: 123})-[:SUPERSEDES*1..5]->(older:Claim)
+WHERE newer.predicate = 'deadline' AND older.predicate = 'deadline'
 RETURN newer.id AS newer_id, older.id AS older_id,
        newer.value AS newer_value, older.value AS older_value;
 
-// 4. Unresolved conflicts (deep-path trigger).
+// 4. Unresolved conflicts for one selected claim endpoint.
 //    CONTRADICTS is directed from the first claim to the second claim.
-MATCH (a:Claim)-[r:CONTRADICTS]->(b:Claim)
-WHERE r.resolved = false
+MATCH (e:Entity {name: 'product launch'})<-[:ABOUT]-(a:Claim {id: 123})-[r:CONTRADICTS]->(b:Claim)
+WHERE a.predicate = 'deadline' AND b.predicate = 'deadline' AND r.resolved = false
 RETURN a.predicate, a.value, b.value, a.valid_from, b.valid_from;
 
 // 5. Coverage probe (abstention trigger): zero rows -> abstain
@@ -102,7 +102,7 @@ def _probes(run: str) -> list[tuple[str, list[str]]]:
     scoped MATCH, and no IS NULL / length() / undirected matches.
     """
     base = (int(run, 16) % 10**9) * 100  # unique integer id space per run
-    a, b, c, d, e, f = (base + i for i in range(1, 7))
+    a, b, c, d, e, f, g, h, i = (base + i for i in range(1, 10))
     run_int = base
     return [
         (
@@ -111,6 +111,28 @@ def _probes(run: str) -> list[tuple[str, list[str]]]:
                 f"CREATE (x:HydraClaimProbe {{run: {run_int}, id: {a}, name: '{run}-a', v: 1}})"
                 f"-[:LINK]->(y:HydraClaimProbe {{run: {run_int}, id: {b}, v: 2}})",
                 f"MATCH (x:HydraClaimProbe {{id: {a}}})-[:LINK]->(y) RETURN y.v AS v",
+            ],
+        ),
+        (
+            "property-scoped selected relation reads",
+            [
+                f"CREATE (e:HydraClaimProbe {{run: {run_int}, id: {g}, name: '{run}-subject'}})",
+                f"CREATE (a:HydraClaimProbe {{run: {run_int}, id: {h}, predicate: 'deadline'}})"
+                f"-[:ABOUT]->(e:HydraClaimProbe {{id: {g}}})",
+                f"CREATE (a:HydraClaimProbe {{run: {run_int}, id: {h}}})"
+                f"-[:SUPERSEDES]->(b:HydraClaimProbe {{run: {run_int}, id: {i}, predicate: 'deadline'}})",
+                f"CREATE (a:HydraClaimProbe {{run: {run_int}, id: {h}}})"
+                f"-[:CONTRADICTS {{resolved: false}}]->(b:HydraClaimProbe {{id: {i}}})",
+                f"MATCH (e:HydraClaimProbe {{name: '{run}-subject'}})"
+                f"<-[:ABOUT]-(a:HydraClaimProbe {{id: {h}}})"
+                "-[:SUPERSEDES]->(b:HydraClaimProbe) "
+                "WHERE a.predicate = 'deadline' AND b.predicate = 'deadline' "
+                "RETURN a.id AS new_id, b.id AS old_id",
+                f"MATCH (e:HydraClaimProbe {{name: '{run}-subject'}})"
+                f"<-[:ABOUT]-(a:HydraClaimProbe {{id: {h}}})"
+                "-[r:CONTRADICTS]->(b:HydraClaimProbe) "
+                "WHERE a.predicate = 'deadline' AND b.predicate = 'deadline' "
+                "RETURN a.id AS a_id, b.id AS b_id, r.resolved AS resolved",
             ],
         ),
         (

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from hydraclaim.claim_read import ClaimReader, ClaimScope
+import pytest
+
+from hydraclaim.claim_read import ClaimReadLimitError, ClaimReader, ClaimScope
 
 
 NOW = datetime(2026, 8, 20, tzinfo=timezone.utc)
@@ -85,9 +87,22 @@ class _RelationDB:
 
     def query(self, cypher: str, consistency: str = "causal") -> list[dict]:
         self.queries.append(cypher)
+        if "{id: 1}" not in cypher:
+            return []
         return [
             {"new_id": 1, "old_id": 2},
             {"new_id": 1, "old_id": 99},
+        ]
+
+
+class _LimitDB:
+    def query(self, cypher: str, consistency: str = "causal") -> list[dict]:
+        if "c.key AS key" not in cypher:
+            return []
+        return [
+            _claim(1, "claim-1", "one"),
+            _claim(2, "claim-2", "two"),
+            _claim(3, "claim-3", "three"),
         ]
 
 
@@ -107,7 +122,9 @@ def test_probe_queries_limit_relations_to_selected_claims():
         query for query in db.queries if "SUPERSEDES" in query or "CONTRADICTS" in query
     ]
     assert relation_queries
-    assert all("ABOUT" in query and "e.name" in query for query in relation_queries)
+    assert all(
+        "ABOUT" in query and "e:Entity {name:" in query for query in relation_queries
+    )
 
 
 def test_claim_reads_order_equal_dates_by_claim_id():
@@ -218,6 +235,9 @@ def test_chain_scope_constrains_start_and_older_claims_and_orders_ties():
     assert "start_e.name" in query and "c.predicate" in query
     assert "older.predicate" in query
     assert "ORDER BY older.valid_from DESC, older.id DESC" in query
+    assert query.count("MATCH") == 1
+    assert " IN [" not in query
+    assert ", (" not in query
 
 
 def test_relation_reads_filter_unselected_endpoints():
@@ -228,3 +248,16 @@ def test_relation_reads_filter_unselected_endpoints():
     )
 
     assert relations == ({"new_id": 1, "old_id": 2},)
+    assert db.queries
+    assert all(query.count("MATCH") == 1 for query in db.queries)
+    assert all(" IN [" not in query for query in db.queries)
+    assert all(", (" not in query for query in db.queries)
+    assert all("a:Claim {id:" in query for query in db.queries)
+    assert all("e:Entity {name:" in query for query in db.queries)
+
+
+def test_read_claims_fails_loudly_when_limit_is_exceeded():
+    with pytest.raises(ClaimReadLimitError, match="claim scope limit exceeded"):
+        ClaimReader(_LimitDB()).read_claims(
+            ClaimScope("product launch", "deadline", limit=2)
+        )

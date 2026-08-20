@@ -32,6 +32,21 @@ def test_probe_uses_hydraclaim_label():
     assert any("HydraClaimProbe" in query for query in statements)
 
 
+def test_probe_covers_bounded_relation_read_forms():
+    statements = [query for _, queries in _probes("00000001") for query in queries]
+    relation_queries = [
+        query
+        for query in statements
+        if "MATCH" in query and ("SUPERSEDES" in query or "CONTRADICTS" in query)
+    ]
+
+    assert relation_queries
+    assert all(query.count("MATCH") == 1 for query in relation_queries)
+    assert all(" IN [" not in query for query in relation_queries)
+    assert all(", (" not in query for query in relation_queries)
+    assert all("{id:" in query and "{name:" in query for query in relation_queries)
+
+
 class _CleanupFailureDB:
     def query(self, cypher):
         if "{run:" in cypher and "DETACH DELETE" in cypher:

@@ -29,6 +29,10 @@ class ClaimScope:
     limit: int = 25
 
 
+class ClaimReadLimitError(ValueError):
+    """Raised when a bounded claim scope contains more matches than its limit."""
+
+
 @dataclass(frozen=True)
 class ClaimView:
     id: int
@@ -135,7 +139,13 @@ class ClaimReader:
         )
 
     def read_claims(self, scope: ClaimScope) -> tuple[ClaimView, ...]:
-        if not scope.subject or scope.limit < 1:
+        if (
+            not isinstance(scope.subject, str)
+            or not scope.subject.strip()
+            or not isinstance(scope.limit, int)
+            or isinstance(scope.limit, bool)
+            or scope.limit < 1
+        ):
             raise ValueError("claim scope requires a subject and positive limit")
 
         clauses = [f"e.name = {lit(scope.subject)}"]
@@ -160,7 +170,7 @@ RETURN c.id AS id, c.key AS key, e.name AS subject, c.predicate AS predicate,
        ev.extraction_confidence AS extraction_confidence,
        s.kind AS source_kind, s.author AS author
 ORDER BY c.valid_from DESC, c.id DESC
-LIMIT {int(scope.limit)}"""
+LIMIT {int(scope.limit) + 1}"""
         )
         rows = sorted(
             rows,
@@ -170,6 +180,13 @@ LIMIT {int(scope.limit)}"""
             ),
             reverse=True,
         )
+        if len(rows) > scope.limit:
+            predicate = scope.predicate or "*"
+            raise ClaimReadLimitError(
+                "claim scope limit exceeded for "
+                f"subject={scope.subject!r}, predicate={predicate!r}, "
+                f"limit={scope.limit}; more matches exist"
+            )
         return tuple(
             self._to_claim_view(row, scope, index) for index, row in enumerate(rows, 1)
         )
@@ -200,25 +217,30 @@ LIMIT {int(scope.limit)}"""
             raise ValueError(f"unsupported claim relation: {relation_type!r}")
         if not claim_ids:
             return ()
-        predicate_clause = (
-            f" AND a.predicate = {lit(scope.predicate)}" if scope.predicate else ""
-        )
-        ids = ", ".join(str(int(claim_id)) for claim_id in sorted(claim_ids))
         if relation_type == "SUPERSEDES":
             return_fields = "a.id AS new_id, b.id AS old_id"
             relation_match = "-[:SUPERSEDES]->"
         else:
             return_fields = "a.id AS a_id, b.id AS b_id, r.resolved AS resolved"
             relation_match = "-[r:CONTRADICTS]->"
-        rows = self._db.query(
-            f"""
-MATCH (a:Claim){relation_match}(b:Claim)
-     , (e:Entity)<-[:ABOUT]-(a:Claim)
-WHERE e.name = {lit(scope.subject)}{predicate_clause}
-  AND a.id IN [{ids}] AND b.id IN [{ids}]
+        rows: list[dict] = []
+        for claim_id in sorted(claim_ids):
+            predicate_clause = (
+                f"a.predicate = {lit(scope.predicate)} "
+                f"AND b.predicate = {lit(scope.predicate)}"
+                if scope.predicate
+                else ""
+            )
+            where_clause = f"WHERE {predicate_clause}" if predicate_clause else ""
+            rows.extend(
+                self._db.query(
+                    f"""
+MATCH (e:Entity {{name: {lit(scope.subject)}}})<-[:ABOUT]-(a:Claim {{id: {int(claim_id)}}}){relation_match}(b:Claim)
+{where_clause}
 RETURN {return_fields}
 ORDER BY a.id ASC, b.id ASC"""
-        )
+                )
+            )
         if relation_type == "SUPERSEDES":
             rows = [
                 {
@@ -256,17 +278,13 @@ ORDER BY a.id ASC, b.id ASC"""
         )
         rows = self._db.query(
             f"""
-MATCH p = (c:Claim {{id: {int(claim_id)}}})-[:SUPERSEDES*1..5]->(older:Claim)
-MATCH (c)-[:ABOUT]->(start_e:Entity)
-MATCH (older)-[:ABOUT]->(e:Entity)
+MATCH (start_e:Entity {{name: {lit(scope.subject)}}})<-[:ABOUT]-(c:Claim {{id: {int(claim_id)}}})-[:SUPERSEDES*1..5]->(older:Claim)
 WHERE c.id = {int(claim_id)}
-  AND start_e.name = {lit(scope.subject)}
-  AND e.name = {lit(scope.subject)}
   AND c.predicate = older.predicate
   {predicate_clause}
 RETURN older.id AS id, older.value AS value,
        older.valid_from AS valid_from, older.valid_to AS valid_to,
-       e.name AS subject, older.predicate AS predicate
+       start_e.name AS subject, older.predicate AS predicate
 ORDER BY older.valid_from DESC, older.id DESC"""
         )
         rows = [

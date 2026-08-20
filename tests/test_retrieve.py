@@ -213,10 +213,18 @@ class _FakeDB:
                             }
                         )
             return out
-        if "MATCH (a:Claim)-[:SUPERSEDES]->(b:Claim)" in cypher:
-            return [{"new_id": a, "old_id": b} for a, b in self._sup]
-        if "MATCH (a:Claim)-[r:CONTRADICTS]->(b:Claim)" in cypher:
-            return [{"a_id": a, "b_id": b, "resolved": r} for a, b, r in self._con]
+        if "-[:SUPERSEDES]->" in cypher:
+            match = re.search(r"a:Claim \{id: (\d+)\}", cypher)
+            source = int(match.group(1)) if match else None
+            return [{"new_id": a, "old_id": b} for a, b in self._sup if a == source]
+        if "-[r:CONTRADICTS]->" in cypher:
+            match = re.search(r"a:Claim \{id: (\d+)\}", cypher)
+            source = int(match.group(1)) if match else None
+            return [
+                {"a_id": a, "b_id": b, "resolved": r}
+                for a, b, r in self._con
+                if a == source
+            ]
         if "c.key AS key" in cypher:  # fetch_claims (superset of probe cols)
             return self._filter(cypher)
         if "c.status AS status" in cypher:  # probe
