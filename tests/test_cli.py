@@ -19,6 +19,10 @@ COMMAND_NAMES = (
     "pipeline",
     "benchmark",
     "longmemeval",
+    "record",
+    "process",
+    "status",
+    "events",
 )
 
 

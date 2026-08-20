@@ -28,6 +28,10 @@ COMMANDS = {
     "pipeline": "hydraclaim.pipeline",
     "benchmark": "hydraclaim.benchmark",
     "longmemeval": "hydraclaim.longmemeval",
+    "record": "hydraclaim.record",
+    "process": "hydraclaim.process",
+    "status": "hydraclaim.status",
+    "events": "hydraclaim.events",
 }
 
 logger = logging.getLogger(__name__)
