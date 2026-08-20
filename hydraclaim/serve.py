@@ -98,7 +98,7 @@ def handle_scenarios() -> dict[str, Any]:
     return {"scenarios": scenarios}
 
 
-# Route hint per gold question type, used when the LLM is unavailable.
+# Route hint per gold question type for deterministic heuristic selection.
 _QTYPE_TO_ROUTE = {
     "conflict": "CONFLICT",
     "abstention": "ABSTAIN",

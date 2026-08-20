@@ -163,6 +163,36 @@ def test_dispatch_maps_classifier_shape_failure(monkeypatch, caplog):
     assert "Traceback" in caplog.text
 
 
+@pytest.mark.parametrize("classifier_response", [[], None])
+def test_dispatch_maps_array_or_null_classifier_response(
+    classifier_response, caplog, monkeypatch
+):
+    def run_reader(question, db, llm_fn, classification_mode):
+        return (
+            serve.ClaimReader(db)
+            .answer(question, classification_mode=classification_mode, llm_fn=llm_fn)
+            .as_dict()
+        )
+
+    monkeypatch.setattr(serve, "handle_ask", run_reader)
+    with caplog.at_level("ERROR", logger="hydraclaim.serve"):
+        status, payload, _ = serve.dispatch(
+            "POST",
+            "/ask",
+            {"question": "Who owns payments?"},
+            FakeDB(),
+            lambda question: classifier_response,
+            classification_mode="llm",
+        )
+
+    assert status == 502
+    assert payload == {
+        "code": "classifier_failed",
+        "error": "question classification failed",
+    }
+    assert "Traceback" in caplog.text
+
+
 def test_dispatch_does_not_hide_unrecognized_programming_errors(monkeypatch):
     def broken(*args, **kwargs):
         raise ValueError("programming error")
@@ -174,10 +204,9 @@ def test_dispatch_does_not_hide_unrecognized_programming_errors(monkeypatch):
         )
 
 
-def test_llm_suggestions_fail_without_heuristic_fallback(monkeypatch):
-    monkeypatch.setattr(
-        "hydraclaim.llm.chat_json", lambda messages: ["not", "an", "object"]
-    )
+@pytest.mark.parametrize("response", [[], None])
+def test_llm_suggestions_fail_without_heuristic_fallback(monkeypatch, response):
+    monkeypatch.setattr("hydraclaim.llm.chat_json", lambda messages: response)
 
     with pytest.raises(serve.SuggestionResponseError, match="suggestion response"):
         serve.handle_suggestions(object(), suggestion_mode="llm")
