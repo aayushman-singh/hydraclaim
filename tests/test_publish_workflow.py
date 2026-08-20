@@ -14,7 +14,7 @@ PINS = {
     "actions/setup-python": "5fda3b95a4ea91299a34e894583c3862153e4b97",
     "actions/upload-artifact": "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
     "actions/download-artifact": "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
-    "pypa/gh-action-pypi-publish": "76f52bc884231f62b9a034ebfe128415bbaabdfc",
+    "pypa/gh-action-pypi-publish": "dc37677b2e1c63e2034f94d8a5b11f265b73ba33",
 }
 
 
