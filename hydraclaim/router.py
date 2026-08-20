@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from hydraclaim.claims import PREDICATES
 from hydraclaim.probe import ProbeResult
@@ -224,12 +224,20 @@ def _classify_with_llm(
     as_of = raw["as_of"]
     if as_of is not None and (not isinstance(as_of, str) or not as_of.strip()):
         raise ValueError("classifier response has invalid as_of")
+    if as_of is not None:
+        try:
+            as_of = date.fromisoformat(as_of)
+        except ValueError as exc:
+            raise ValueError(
+                f"classifier response has invalid as_of date {as_of!r}; "
+                "expected YYYY-MM-DD"
+            ) from exc
 
     return Classification(
         subject=(canonicalize_entity(subject, roster) if subject is not None else None),
         predicate=predicate,
         question_type=question_type,
-        as_of=as_of[:10] if as_of else None,
+        as_of=as_of.isoformat() if as_of else None,
     )
 
 

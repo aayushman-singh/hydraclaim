@@ -126,6 +126,22 @@ def test_classify_rejects_invalid_llm_fields():
         )
 
 
+def test_classify_rejects_invalid_llm_as_of_date():
+    with pytest.raises(ValueError, match="as_of.*not-a-date"):
+        classify(
+            "Who owned the payments integration?",
+            ROSTER,
+            mode="llm",
+            llm_fn=lambda q: {
+                "subject": "payments integration",
+                "predicate": "owned_by",
+                "question_type": "temporal",
+                "as_of": "not-a-date",
+            },
+            now=NOW,
+        )
+
+
 def test_classify_llm_mode_propagates_when_llm_raises():
     def boom(q):
         raise RuntimeError("provider down")
