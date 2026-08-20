@@ -99,6 +99,10 @@ def test_release_archives_exclude_local_and_generated_content() -> None:
 
     with zipfile.ZipFile(wheel_path) as archive:
         wheel_names = archive.namelist()
+        metadata_name = next(
+            name for name in wheel_names if name.endswith(".dist-info/METADATA")
+        )
+        wheel_metadata = archive.read(metadata_name).decode("utf-8")
     with tarfile.open(sdist_path) as archive:
         sdist_names = archive.getnames()
 
@@ -163,3 +167,13 @@ def test_release_archives_exclude_local_and_generated_content() -> None:
         assert any(name.endswith("hydraclaim/cli.py") for name in names)
         assert any(name.endswith("hydraclaim/schema.cypher") for name in names)
         assert not [name for name in names if forbidden_name(name)], archive_type
+
+    sdist_root = sdist_path.name.removesuffix(".tar.gz") + "/"
+    assert f"{sdist_root}README.md" in sdist_names
+    assert f"{sdist_root}LICENSE" in sdist_names
+
+    wheel_dist_info = metadata_name.removesuffix("METADATA")
+    assert f"{wheel_dist_info}licenses/LICENSE" in wheel_names
+    assert "License-File: LICENSE" in wheel_metadata
+    readme = (ROOT / "README.md").read_text(encoding="utf-8").strip()
+    assert readme in wheel_metadata

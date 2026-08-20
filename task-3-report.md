@@ -56,3 +56,23 @@ Final fix verification:
 - `ruff format --check .`: 55 files already formatted.
 - `git diff --check`: passed.
 - Archive inspection: wheel 37 entries and sdist 75 entries. Both have no forbidden entries.
+
+## Round 2 verification
+
+Archive tests now verify release documentation and license files:
+
+- The source archive contains exact `README.md` and `LICENSE` paths.
+- The wheel contains README content in `hydraclaim-0.2.0.dist-info/METADATA`.
+- The wheel contains the license at the exact standard path `hydraclaim-0.2.0.dist-info/licenses/LICENSE`.
+- Wheel metadata contains the exact `License-File: LICENSE` field.
+
+Fresh build verification:
+
+- `python -m build`: built both `0.2.0` artifacts.
+- `python -m pytest tests/test_package_metadata.py -v`: 8 passed.
+- `python -m pytest`: 253 passed.
+- `python -m twine check ...`: both artifacts passed.
+- Archive scan: wheel 37 entries and sdist 75 entries. Required files are present and forbidden entries are absent.
+- `ruff check --fix .`: passed.
+- `ruff format --check .`: 55 files already formatted.
+- `git diff --check`: passed.
