@@ -9,6 +9,15 @@ import hydraclaim
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_ci_workflow_uses_current_actions_and_read_only_checkout() -> None:
+    text = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+    assert "permissions:\n  contents: read" in text
+    assert "uses: actions/checkout@v7" in text
+    assert "persist-credentials: false" in text
+    assert "uses: actions/setup-python@v7" in text
+
+
 def test_project_metadata_is_complete() -> None:
     metadata = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     project = metadata["project"]
