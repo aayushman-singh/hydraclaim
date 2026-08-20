@@ -37,21 +37,25 @@ WHERE c.predicate = 'owned_by' AND c.status = 'active'
 RETURN c.value, c.valid_from
 ORDER BY c.valid_from DESC;
 
-// 2. Time travel: what was believed as of T
-//    (recorded_at <= T AND (valid_to IS NULL OR valid_to > T))
+// 2. Time travel: what was believed as of T.
+//    An empty valid_to value marks an open validity window.
 MATCH (c:Claim)-[:ABOUT]->(e:Entity {name: 'product launch'})
 WHERE c.predicate = 'deadline'
   AND c.recorded_at <= '2026-05-12T00:00:00+00:00'
-  AND (c.valid_to IS NULL OR c.valid_to > '2026-05-12')
+  AND (c.valid_to = '' OR c.valid_to > '2026-05-12')
 RETURN c.value, c.valid_from, c.valid_to;
 
-// 3. Supersession chain: chronology of an overwritten fact
+// 3. Supersession chain: chronology of an overwritten claim.
+//    HydraDB returns the matching pairs. Compute chain depth client-side
+//    from the directed pairs because the dialect has no path-length function.
 MATCH p = (newer:Claim)-[:SUPERSEDES*1..5]->(older:Claim)
 WHERE newer.predicate = 'deadline'
-RETURN newer.value, older.value, length(p) AS hops;
+RETURN newer.id AS newer_id, older.id AS older_id,
+       newer.value AS newer_value, older.value AS older_value;
 
-// 4. Unresolved conflicts (deep-path trigger)
-MATCH (a:Claim)-[r:CONTRADICTS]-(b:Claim)
+// 4. Unresolved conflicts (deep-path trigger).
+//    CONTRADICTS is directed from the first claim to the second claim.
+MATCH (a:Claim)-[r:CONTRADICTS]->(b:Claim)
 WHERE r.resolved = false
 RETURN a.predicate, a.value, b.value, a.valid_from, b.valid_from;
 

@@ -2,8 +2,8 @@
 
 HydraDB supports a *subset* of OpenCypher. Everything HydraClaim relies on
 is probed here against a live node, so we learn on day 1 (not day 5) if a
-feature is missing. Probe nodes are labelled TGProbe and carry a per-run
-`run` id; cleanup is best-effort.
+feature is missing. Probe nodes are labelled HydraClaimProbe and carry a
+per-run `run` id.
 
 CLI: python -m hydraclaim.schema --verify
 """
@@ -28,43 +28,67 @@ def _probes(run: str) -> list[tuple[str, list[str]]]:
     a, b, c, d, e, f = (base + i for i in range(1, 7))
     run_int = base
     return [
-        ("one-hop CREATE + read back", [
-            f"CREATE (x:TGProbe {{run: {run_int}, id: {a}, name: '{run}-a', v: 1}})"
-            f"-[:LINK]->(y:TGProbe {{run: {run_int}, id: {b}, v: 2}})",
-            f"MATCH (x:TGProbe {{id: {a}}})-[:LINK]->(y) RETURN y.v AS v",
-        ]),
-        ("upsert by integer id (re-CREATE is idempotent)", [
-            f"CREATE (x:TGProbe {{id: {a}}})-[:LINK]->(y:TGProbe {{id: {b}}})",
-            f"MATCH (n:TGProbe {{run: {run_int}}}) RETURN count(n.id) AS c",
-        ]),
-        ("string equality in WHERE over an edge pattern", [
-            f"MATCH (x:TGProbe)-[:LINK]->(y:TGProbe) WHERE x.name = '{run}-a' "
-            "RETURN x.id AS id",
-        ]),
-        ("bounded variable-length path (SUPERSEDES*1..5 shape)", [
-            f"CREATE (x:TGProbe {{id: {b}}})-[:NEXT]->(y:TGProbe "
-            f"{{run: {run_int}, id: {c}, v: 3}})",
-            f"CREATE (x:TGProbe {{id: {c}}})-[:NEXT]->(y:TGProbe "
-            f"{{run: {run_int}, id: {d}, v: 4}})",
-            f"MATCH p=(x:TGProbe {{id: {b}}})-[:NEXT*1..5]->(y) RETURN y.id AS id",
-        ]),
-        ("OPTIONAL MATCH", [
-            f"MATCH (n:TGProbe {{id: {a}}}) "
-            "OPTIONAL MATCH (n)-[:MISSING]->(m) RETURN m.id AS mid",
-        ]),
-        ("aggregation count(*) over an edge pattern", [
-            f"MATCH (x:TGProbe {{id: {a}}})-[:LINK]->(y:TGProbe {{id: {b}}}) "
-            "RETURN count(*) AS c",
-        ]),
-        ("SET update", [
-            f"MATCH (n:TGProbe {{id: {a}}}) SET n.flag = true",
-            f"MATCH (n:TGProbe {{id: {a}}}) RETURN n.flag AS flag",
-        ]),
-        ("label/property-scoped DETACH DELETE (reset pattern)", [
-            f"CREATE (x:TGProbe {{run: {run_int}, id: {e}}})"
-            f"-[:TMP]->(y:TGProbe {{run: {run_int}, id: {f}}})",
-            f"MATCH (n:TGProbe {{id: {e}}}) DETACH DELETE n",
-        ]),
+        (
+            "one-hop CREATE + read back",
+            [
+                f"CREATE (x:HydraClaimProbe {{run: {run_int}, id: {a}, name: '{run}-a', v: 1}})"
+                f"-[:LINK]->(y:HydraClaimProbe {{run: {run_int}, id: {b}, v: 2}})",
+                f"MATCH (x:HydraClaimProbe {{id: {a}}})-[:LINK]->(y) RETURN y.v AS v",
+            ],
+        ),
+        (
+            "upsert by integer id (re-CREATE is idempotent)",
+            [
+                f"CREATE (x:HydraClaimProbe {{id: {a}}})-[:LINK]->(y:HydraClaimProbe {{id: {b}}})",
+                f"MATCH (n:HydraClaimProbe {{run: {run_int}}}) RETURN count(n.id) AS c",
+            ],
+        ),
+        (
+            "string equality in WHERE over an edge pattern",
+            [
+                f"MATCH (x:HydraClaimProbe)-[:LINK]->(y:HydraClaimProbe) WHERE x.name = '{run}-a' "
+                "RETURN x.id AS id",
+            ],
+        ),
+        (
+            "bounded variable-length path (SUPERSEDES*1..5 shape)",
+            [
+                f"CREATE (x:HydraClaimProbe {{id: {b}}})-[:NEXT]->(y:HydraClaimProbe "
+                f"{{run: {run_int}, id: {c}, v: 3}})",
+                f"CREATE (x:HydraClaimProbe {{id: {c}}})-[:NEXT]->(y:HydraClaimProbe "
+                f"{{run: {run_int}, id: {d}, v: 4}})",
+                f"MATCH p=(x:HydraClaimProbe {{id: {b}}})-[:NEXT*1..5]->(y) RETURN y.id AS id",
+            ],
+        ),
+        (
+            "OPTIONAL MATCH",
+            [
+                f"MATCH (n:HydraClaimProbe {{id: {a}}}) "
+                "OPTIONAL MATCH (n)-[:MISSING]->(m) RETURN m.id AS mid",
+            ],
+        ),
+        (
+            "aggregation count(*) over an edge pattern",
+            [
+                f"MATCH (x:HydraClaimProbe {{id: {a}}})-[:LINK]->(y:HydraClaimProbe {{id: {b}}}) "
+                "RETURN count(*) AS c",
+            ],
+        ),
+        (
+            "SET update",
+            [
+                f"MATCH (n:HydraClaimProbe {{id: {a}}}) SET n.flag = true",
+                f"MATCH (n:HydraClaimProbe {{id: {a}}}) RETURN n.flag AS flag",
+            ],
+        ),
+        (
+            "label/property-scoped DETACH DELETE (reset pattern)",
+            [
+                f"CREATE (x:HydraClaimProbe {{run: {run_int}, id: {e}}})"
+                f"-[:TMP]->(y:HydraClaimProbe {{run: {run_int}, id: {f}}})",
+                f"MATCH (n:HydraClaimProbe {{id: {e}}}) DETACH DELETE n",
+            ],
+        ),
     ]
 
 
@@ -84,17 +108,21 @@ def verify(db: HydraDB) -> bool:
             print(f"FAIL  {name}: {detail}")
     try:
         run_int = (int(run, 16) % 10**9) * 100
-        db.query(f"MATCH (n:TGProbe {{run: {run_int}}}) DETACH DELETE n")
+        db.query(f"MATCH (n:HydraClaimProbe {{run: {run_int}}}) DETACH DELETE n")
         print("cleanup: probe nodes deleted")
     except HydraDBError as exc:
+        all_ok = False
         print(f"cleanup: FAILED (probe nodes with run '{run}' left behind): {exc}")
     return all_ok
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="hydraclaim.schema")
-    parser.add_argument("--verify", action="store_true",
-                        help="probe a live HydraDB node for the features HydraClaim needs")
+    parser.add_argument(
+        "--verify",
+        action="store_true",
+        help="probe a live HydraDB node for the features HydraClaim needs",
+    )
     args = parser.parse_args()
     if not args.verify:
         parser.print_help()
