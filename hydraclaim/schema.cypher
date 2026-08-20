@@ -22,7 +22,7 @@
 // (Claim)-[:SUPERSEDES {at}]->(Claim)                        // explicit overwrite, new -> old
 // (Claim)-[:CONTRADICTS {resolved, detected_at}]->(Claim)    // unresolved conflict
 //
-// Invariant: facts are never overwritten. A correction creates a new Claim
+// Invariant: claims are never overwritten. A correction creates a new Claim
 // plus a SUPERSEDES edge; the old claim keeps its validity window closed by
 // valid_to. Contradictions without a supersession edge stay CONTRADICTS
 // {resolved: false} until reconciled.
@@ -65,5 +65,5 @@ WHERE c.predicate = 'budget'
 RETURN count(c) AS coverage;
 
 // 6. Evidence with provenance for citations
-MATCH (c:Claim {id: 'deadline_drift:dl-3'})-[:SUPPORTED_BY]->(ev:Evidence)-[:FROM]->(s:Source)
+MATCH (c:Claim {key: 'deadline_drift:dl-3'})-[:SUPPORTED_BY]->(ev:Evidence)-[:FROM]->(s:Source)
 RETURN ev.quote, ev.ts, s.kind, s.author;

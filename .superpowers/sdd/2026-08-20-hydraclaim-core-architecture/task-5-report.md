@@ -24,3 +24,13 @@ Complete.
 ## Concerns
 
 The repository-wide Ruff check remains non-zero because of the existing `max_w` and `total_frames` unused variables in `demo/term-video.py`. They are outside Task 5 and were not changed.
+
+## Review fix round 1
+
+- Changed the provenance example to match the string `key` property. Claim graph `id` values remain integers.
+- Added `render_schema_reference()` as the canonical schema source in `hydraclaim/schema.py`.
+- Added a test that requires `schema.cypher` to equal the rendered reference.
+- Added a regression test for the provenance `key` match.
+- Focused tests after the fix: `22 passed`.
+- Full tests after the fix: `176 passed`.
+- Touched-file Ruff check after the fix: passed.
