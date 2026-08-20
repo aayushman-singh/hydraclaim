@@ -61,6 +61,24 @@ def test_publish_workflow_tests_and_uploads_exact_build_artifacts() -> None:
     assert text.count("          path: dist/") == 2
 
 
+def test_publish_workflow_checks_tag_against_project_version_before_build() -> None:
+    text = _workflow_text()
+
+    gate = "python scripts/verify_release_tag.py"
+    assert gate in text
+    assert "        env:\n          GITHUB_REF_NAME: ${{ github.ref_name }}" in text
+    assert text.index(gate) < text.index("python -m build")
+
+
+def test_release_tag_gate_uses_stdlib_tomllib_and_explicit_mismatch_message() -> None:
+    script = (ROOT / "scripts" / "verify_release_tag.py").read_text(encoding="utf-8")
+
+    assert "import tomllib" in script
+    assert "tomllib.loads" in script
+    assert "GITHUB_REF_NAME" in script
+    assert "does not match project version" in script
+
+
 def test_publish_job_only_downloads_and_publishes() -> None:
     text = _workflow_text()
     publish_section = text.split("  publish:\n", maxsplit=1)[1]

@@ -33,6 +33,27 @@ HydraClaim now has a tag-only PyPI publication workflow.
 - `python -m twine check dist/*`: both artifacts passed.
 - `git diff --check`: passed.
 
+## Round 1 remediation
+
+The build job now verifies the release tag before it builds the package.
+
+- `scripts/verify_release_tag.py` reads `[project].version` with `tomllib`.
+- It compares `GITHUB_REF_NAME` with the exact `v${version}` value.
+- It stops with an explicit error when the values differ.
+- Unit tests cover `v0.2.0` and reject `v0.2.1`.
+- Workflow-content tests confirm the gate runs before `python -m build`.
+
+Round 1 verification:
+
+- `python -m pytest tests/ -q`: 283 passed.
+- `python -m pytest tests/test_release_tag.py -q`: 2 passed.
+- Publish workflow YAML syntax: passed with PyYAML.
+- `ruff check --fix .`: passed.
+- `ruff format .`: passed.
+- `python -m build`: built the `0.2.0` wheel and source archive.
+- `python -m twine check dist/*`: both artifacts passed.
+- `git diff --check`: passed.
+
 ## Files
 
 - `.github/workflows/publish.yml`
