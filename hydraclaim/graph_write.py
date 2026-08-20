@@ -93,6 +93,24 @@ def _require_dict(value: object, name: str, errors: list[str]) -> dict:
     return value
 
 
+def _validate_scalar(value: object, name: str, errors: list[str]) -> None:
+    if not isinstance(value, (str, int, float, bool)):
+        errors.append(f"{name} must be a scalar")
+
+
+def _validate_entity(entity: object, name: str, errors: list[str]) -> None:
+    value = _require_dict(entity, name, errors)
+    if not isinstance(value.get("name"), str) or not value.get("name"):
+        errors.append(f"{name}.name must be a non-empty string")
+    if "type" in value and not isinstance(value["type"], str):
+        errors.append(f"{name}.type must be a string")
+    aliases = value.get("aliases", [])
+    if not isinstance(aliases, list) or any(
+        not isinstance(alias, str) for alias in aliases
+    ):
+        errors.append(f"{name}.aliases must be a list of strings")
+
+
 def _validate_claim(claim: object, name: str, errors: list[str]) -> None:
     value = _require_dict(claim, name, errors)
     required = {
@@ -112,6 +130,16 @@ def _validate_claim(claim: object, name: str, errors: list[str]) -> None:
     if value.get("source_kind") not in SOURCE_KINDS:
         errors.append(f"{name} has unknown source_kind: {value.get('source_kind')!r}")
     for field in ("subject", "value", "valid_from", "quote", "author"):
+        if field in value and not isinstance(value[field], str):
+            errors.append(f"{name}.{field} must be a string")
+    if "type" in value:
+        _validate_scalar(value["type"], f"{name}.type", errors)
+    if "status" in value and not isinstance(value["status"], str):
+        errors.append(f"{name}.status must be a string")
+    if "valid_to" in value and value["valid_to"] is not None:
+        if not isinstance(value["valid_to"], str):
+            errors.append(f"{name}.valid_to must be a string or null")
+    for field in ("session_id", "msg_id"):
         if field in value and not isinstance(value[field], str):
             errors.append(f"{name}.{field} must be a string")
     for field in ("explicitness", "confidence"):
@@ -134,16 +162,7 @@ def _validate_document(document: object) -> list[str]:
         errors.append("entities must be a list")
     else:
         for index, entity in enumerate(entities):
-            entity_value = _require_dict(entity, f"entities[{index}]", errors)
-            if not isinstance(entity_value.get("name"), str) or not entity_value.get(
-                "name"
-            ):
-                errors.append(f"entities[{index}].name must be a non-empty string")
-            aliases = entity_value.get("aliases", [])
-            if not isinstance(aliases, list) or any(
-                not isinstance(alias, str) for alias in aliases
-            ):
-                errors.append(f"entities[{index}].aliases must be a list of strings")
+            _validate_entity(entity, f"entities[{index}]", errors)
 
     ground_truth = _require_dict(doc.get("ground_truth"), "ground_truth", errors)
     claims = ground_truth.get("claims")
@@ -255,19 +274,34 @@ def _validate_plan(plan: object, scenario_id: object, entities: object) -> list[
             errors.append("entities must be a list")
         else:
             for index, entity in enumerate(entities):
-                entity_value = _require_dict(entity, f"entities[{index}]", errors)
-                if not isinstance(
-                    entity_value.get("name"), str
-                ) or not entity_value.get("name"):
-                    errors.append(f"entities[{index}].name must be a non-empty string")
-                aliases = entity_value.get("aliases", [])
-                if not isinstance(aliases, list) or any(
-                    not isinstance(alias, str) for alias in aliases
-                ):
-                    errors.append(
-                        f"entities[{index}].aliases must be a list of strings"
-                    )
+                _validate_entity(entity, f"entities[{index}]", errors)
     return errors
+
+
+def _validate_relation_endpoints(db: Any, plan: dict) -> None:
+    create_ids = {claim["id"] for claim in plan["create"]}
+    references = (
+        [("SUPERSEDES", edge["new_id"]) for edge in plan["supersede"]]
+        + [("SUPERSEDES", edge["old_id"]) for edge in plan["supersede"]]
+        + [("CONTRADICTS", edge["a_id"]) for edge in plan["contradict"]]
+        + [("CONTRADICTS", edge["b_id"]) for edge in plan["contradict"]]
+    )
+
+    missing: list[str] = []
+    checked: dict[str, bool] = {}
+    for relation, claim_id in references:
+        if claim_id in create_ids:
+            continue
+        exists = checked.get(claim_id)
+        if exists is None:
+            exists = _node_exists(db, "Claim", claim_id)
+            checked[claim_id] = exists
+        if not exists:
+            missing.append(f"{relation} endpoint {claim_id!r}")
+    if missing:
+        raise ValueError(
+            "invalid write plan: unknown Claim endpoint(s): " + ", ".join(missing)
+        )
 
 
 class GraphWriter:
@@ -360,6 +394,7 @@ class GraphWriter:
         errors = _validate_plan(plan, scenario_id, entities)
         if errors:
             raise ValueError(f"invalid write plan for {scenario_id!r}: {errors}")
+        _validate_relation_endpoints(self._db, plan)
 
         recorded_at = datetime.now(timezone.utc).isoformat()
         stats = {
@@ -376,6 +411,8 @@ class GraphWriter:
 
         for draft in plan["create"]:
             claim_id = draft["id"]
+            if _node_exists(self._db, "Claim", claim_id):
+                continue
             subject = draft["subject"]
             if subject in entity_endpoint:
                 endpoint = entity_endpoint[subject]
