@@ -13,7 +13,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import time
 from typing import Any
 
 import httpx
@@ -76,25 +75,20 @@ def chat(
     url = f"{cfg['base_url'].rstrip('/')}/chat/completions"
     request_timeout = timeout or cfg["timeout"]
 
-    last_error: LLMError | None = None
-    for attempt in range(3):
-        try:
-            with httpx.Client(timeout=request_timeout) as client:
-                resp = client.post(url, json=payload, headers=headers)
-            if resp.status_code >= 500:
-                last_error = LLMError(
-                    f"LLM server error (HTTP {resp.status_code}): {resp.text[:300]}"
-                )
-            elif resp.status_code != 200:
-                raise LLMError(
-                    f"LLM request failed (HTTP {resp.status_code}): {resp.text[:300]}"
-                )
-            else:
-                return resp.json()["choices"][0]["message"]["content"]
-        except httpx.HTTPError as exc:
-            last_error = LLMError(f"LLM network error: {exc}")
-        time.sleep(1.5 * (attempt + 1))
-    raise last_error or LLMError("LLM request failed without a recorded error")
+    try:
+        with httpx.Client(timeout=request_timeout) as client:
+            resp = client.post(url, json=payload, headers=headers)
+        if resp.status_code >= 500:
+            raise LLMError(
+                f"LLM server error (HTTP {resp.status_code}): {resp.text[:300]}"
+            )
+        if resp.status_code != 200:
+            raise LLMError(
+                f"LLM request failed (HTTP {resp.status_code}): {resp.text[:300]}"
+            )
+        return resp.json()["choices"][0]["message"]["content"]
+    except httpx.HTTPError as exc:
+        raise LLMError(f"LLM network error: {exc}") from exc
 
 
 def chat_json(messages: list[dict], **kwargs: Any) -> Any:

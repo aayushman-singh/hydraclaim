@@ -193,27 +193,43 @@ def _classify_with_llm(
     """Classify with an injected LLM function.
 
     The LLM function takes a question string and returns a dictionary with
-    any of {subject, predicate, question_type, as_of}. Invalid fields use the
-    deterministic interpretation, but errors from the classifier propagate.
+    {subject, predicate, question_type, as_of}. Invalid responses raise a
+    validation error.
     """
-    fallback = heuristic_classify(question, roster, now)
     raw = llm_fn(question)
     if not isinstance(raw, dict):
         raise ValueError("classifier returned non-dict")
-    subject = raw.get("subject")
-    predicate = raw.get("predicate")
-    question_type = raw.get("question_type")
+    missing = {"subject", "predicate", "question_type", "as_of"} - raw.keys()
+    if missing:
+        raise ValueError(
+            "classifier response missing fields: " + ", ".join(sorted(missing))
+        )
+
+    subject = raw["subject"]
+    if subject is not None and (not isinstance(subject, str) or not subject.strip()):
+        raise ValueError("classifier response has invalid subject")
+
+    predicate = raw["predicate"]
+    if predicate is not None and (
+        not isinstance(predicate, str) or predicate not in PREDICATES
+    ):
+        raise ValueError(f"classifier response has invalid predicate: {predicate!r}")
+
+    question_type = raw["question_type"]
+    if not isinstance(question_type, str) or question_type not in QUESTION_TYPES:
+        raise ValueError(
+            f"classifier response has invalid question_type: {question_type!r}"
+        )
+
+    as_of = raw["as_of"]
+    if as_of is not None and (not isinstance(as_of, str) or not as_of.strip()):
+        raise ValueError("classifier response has invalid as_of")
+
     return Classification(
-        subject=(
-            canonicalize_entity(subject, roster)
-            if isinstance(subject, str) and subject.strip()
-            else fallback.subject
-        ),
-        predicate=(predicate if predicate in PREDICATES else fallback.predicate),
-        question_type=(
-            question_type if question_type in QUESTION_TYPES else fallback.question_type
-        ),
-        as_of=(str(raw["as_of"])[:10] if raw.get("as_of") else fallback.as_of),
+        subject=(canonicalize_entity(subject, roster) if subject is not None else None),
+        predicate=predicate,
+        question_type=question_type,
+        as_of=as_of[:10] if as_of else None,
     )
 
 

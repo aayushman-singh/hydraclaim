@@ -105,6 +105,33 @@ def test_handle_ask_passes_classification_mode(monkeypatch):
     assert seen["classification_mode"] == "llm"
 
 
+def test_http_ask_passes_llm_classification_mode_to_retrieval(monkeypatch):
+    seen = {}
+
+    def capture(db, question, **kwargs):
+        seen.update(kwargs)
+        return {
+            "route": "ABSTAIN",
+            "answer": "",
+            "citations": [],
+            "classification": {},
+            "probe": None,
+        }
+
+    monkeypatch.setattr(retrieve, "answer", capture)
+    status, _, _ = serve.dispatch(
+        "POST",
+        "/ask",
+        {"question": "Who owns payments?"},
+        FakeDB(),
+        lambda _: {},
+        classification_mode="llm",
+    )
+
+    assert status == 200
+    assert seen["classification_mode"] == "llm"
+
+
 def test_handle_scenarios_reads_generated_data():
     payload = serve.handle_scenarios()
     ids = {s["id"] for s in payload["scenarios"]}

@@ -110,21 +110,20 @@ def test_classify_uses_llm_output_when_valid():
     assert cls.predicate == "owned_by"
 
 
-def test_classify_falls_back_on_bad_llm_output():
-    cls = classify(
-        "Who owns the payments integration?",
-        ROSTER,
-        mode="llm",
-        llm_fn=lambda q: {
-            "subject": None,
-            "predicate": "not-a-predicate",
-            "question_type": "weird",
-        },
-        now=NOW,
-    )
-    assert cls.subject == "payments integration"  # heuristic rescued it
-    assert cls.predicate == "owned_by"
-    assert cls.question_type == "lookup"
+def test_classify_rejects_invalid_llm_fields():
+    with pytest.raises(ValueError, match="predicate"):
+        classify(
+            "Who owns the payments integration?",
+            ROSTER,
+            mode="llm",
+            llm_fn=lambda q: {
+                "subject": "payments integration",
+                "predicate": "not-a-predicate",
+                "question_type": "lookup",
+                "as_of": None,
+            },
+            now=NOW,
+        )
 
 
 def test_classify_llm_mode_propagates_when_llm_raises():
