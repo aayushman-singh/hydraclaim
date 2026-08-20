@@ -18,7 +18,7 @@ from pathlib import Path
 
 from hydraclaim.db import HydraDB
 from hydraclaim.errors import PipelineInputError
-from hydraclaim.extract import extract_session
+from hydraclaim.extract import _parse_timestamp, extract_session
 from hydraclaim.graph_write import GraphWriter
 from hydraclaim.reconcile import plan_writes
 from hydraclaim.claims import SOURCE_KINDS
@@ -27,6 +27,15 @@ from hydraclaim.claims import SOURCE_KINDS
 def _required_string(value: object, path: str, errors: list[str]) -> None:
     if not isinstance(value, str) or not value.strip():
         errors.append(f"{path} must be a non-empty string")
+
+
+def _timestamp(value: object, path: str, errors: list[str]) -> None:
+    if not isinstance(value, str) or not value.strip():
+        return
+    try:
+        _parse_timestamp(value, label=path)
+    except ValueError:
+        errors.append(f"{path} must be a valid ISO timestamp")
 
 
 def validate_pipeline_document(document: object) -> dict:
@@ -75,6 +84,10 @@ def validate_pipeline_document(document: object) -> dict:
             _required_string(
                 session.get("session_id"), f"{session_path}.session_id", errors
             )
+            if "started_at" in session:
+                _timestamp(
+                    session.get("started_at"), f"{session_path}.started_at", errors
+                )
             messages = session.get("messages")
             if not isinstance(messages, list):
                 errors.append(f"{session_path}.messages must be a list")
@@ -88,6 +101,7 @@ def validate_pipeline_document(document: object) -> dict:
                     _required_string(
                         message.get(field), f"{message_path}.{field}", errors
                     )
+                _timestamp(message.get("ts"), f"{message_path}.ts", errors)
                 if (
                     "source_kind" in message
                     and message.get("source_kind") not in SOURCE_KINDS
@@ -234,4 +248,6 @@ def main(argv: Sequence[str] | None = None) -> int | None:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    from hydraclaim.cli import run_module
+
+    raise SystemExit(run_module("pipeline", main))

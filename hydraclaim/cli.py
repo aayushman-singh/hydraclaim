@@ -8,7 +8,7 @@ import importlib.metadata
 import json
 import logging
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 from hydraclaim.config import ConfigurationError
 from hydraclaim.db import HydraDBError
@@ -31,6 +31,47 @@ COMMANDS = {
 }
 
 logger = logging.getLogger(__name__)
+
+
+def run_module(
+    command: str,
+    command_main: Callable[[Sequence[str] | None], int | None],
+    argv: Sequence[str] | None = None,
+) -> int:
+    """Run a documented module form with concise expected-error output."""
+    try:
+        result = command_main(argv)
+    except ConfigurationError as exc:
+        return _report_expected_failure(
+            command, "configuration_error", exc, log_traceback=False
+        )
+    except GraphIntegrityError as exc:
+        return _report_expected_failure(
+            command, "graph_integrity_error", exc, log_traceback=False
+        )
+    except ClaimReadLimitError as exc:
+        return _report_expected_failure(
+            command, "claim_limit_exceeded", exc, log_traceback=False
+        )
+    except HydraDBError as exc:
+        return _report_expected_failure(
+            command, "graph_backend_failed", exc, log_traceback=False
+        )
+    except LLMError as exc:
+        return _report_expected_failure(command, "llm_failed", exc, log_traceback=False)
+    except json.JSONDecodeError as exc:
+        return _report_expected_failure(
+            command, "invalid_json", exc, log_traceback=False
+        )
+    except FileNotFoundError as exc:
+        return _report_expected_failure(command, "file_error", exc, log_traceback=False)
+    except OSError as exc:
+        return _report_expected_failure(command, "file_error", exc, log_traceback=False)
+    except ValueError as exc:
+        return _report_expected_failure(
+            command, "validation_error", exc, log_traceback=False
+        )
+    return 0 if result is None else result
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -99,13 +140,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0 if result is None else result
 
 
-def _report_expected_failure(command: str, code: str, exc: Exception) -> int:
-    logger.exception(
-        "command failed command=%s code=%s exception_type=%s",
-        command,
-        code,
-        type(exc).__name__,
-    )
+def _report_expected_failure(
+    command: str, code: str, exc: Exception, *, log_traceback: bool = True
+) -> int:
+    if log_traceback:
+        logger.exception(
+            "command failed command=%s code=%s exception_type=%s",
+            command,
+            code,
+            type(exc).__name__,
+        )
+    else:
+        logger.error(
+            "command failed command=%s code=%s exception_type=%s",
+            command,
+            code,
+            type(exc).__name__,
+        )
     message = str(exc) or code.replace("_", " ")
     print(f"hydraclaim: error: {code}: {message}", file=sys.stderr)
     return 1

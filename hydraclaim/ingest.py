@@ -51,4 +51,6 @@ def main(argv: Sequence[str] | None = None) -> int | None:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    from hydraclaim.cli import run_module
+
+    raise SystemExit(run_module("ingest", main))

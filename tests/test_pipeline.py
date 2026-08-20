@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 
 import pytest
 
@@ -113,6 +116,19 @@ def test_pipeline_rejects_malformed_document_before_db_access(document):
     assert db.writes == []
 
 
+@pytest.mark.parametrize("timestamp", ["not-a-timestamp", "12345"])
+def test_pipeline_rejects_invalid_message_timestamp_before_db_access(timestamp):
+    db = _RecordingDB()
+    document = _document()
+    document["sessions"][0]["messages"][0]["ts"] = timestamp
+
+    with pytest.raises(PipelineInputError, match="timestamp"):
+        pipeline.run_pipeline(db, document)
+
+    assert db.reads == []
+    assert db.writes == []
+
+
 def test_unified_cli_reports_malformed_pipeline_document_without_connecting(
     monkeypatch, tmp_path, capsys
 ):
@@ -131,3 +147,23 @@ def test_unified_cli_reports_malformed_pipeline_document_without_connecting(
     assert "hydraclaim: error: validation_error:" in stderr
     assert "invalid pipeline document" in stderr
     assert "Traceback" not in stderr
+
+
+def test_pipeline_module_reports_expected_failure_without_traceback(tmp_path):
+    scenario_path = tmp_path / "malformed.json"
+    scenario_path.write_text(json.dumps({"scenario_id": "missing-fields"}))
+    environment = os.environ.copy()
+    environment["LLM_API_KEY"] = "test-key"
+
+    completed = subprocess.run(
+        [sys.executable, "-m", "hydraclaim.pipeline", str(scenario_path)],
+        capture_output=True,
+        text=True,
+        env=environment,
+        check=False,
+    )
+
+    assert completed.returncode == 1
+    assert "hydraclaim: error: validation_error:" in completed.stderr
+    assert "invalid pipeline document" in completed.stderr
+    assert "Traceback" not in completed.stderr

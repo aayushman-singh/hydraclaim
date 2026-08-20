@@ -62,6 +62,16 @@ _DATE_RE = re.compile(
 _DATE_PREDICATES = frozenset({"deadline"})
 
 
+def _parse_timestamp(raw: object, *, label: str = "session timestamp") -> datetime:
+    """Parse one package-accepted ISO timestamp or fail loudly."""
+    if not isinstance(raw, str) or not raw.strip():
+        raise ValueError(f"invalid {label}: {raw!r}")
+    try:
+        return datetime.fromisoformat(raw.strip().replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(f"invalid {label}: {raw!r}") from exc
+
+
 def _reference_date(session: dict) -> date:
     """Return the session date from its timestamp, or raise on bad input."""
     raw = session.get("started_at")
@@ -72,10 +82,7 @@ def _reference_date(session: dict) -> date:
             raw = first_message.get("ts") if isinstance(first_message, dict) else None
     if raw is None:
         raw = session.get("ts")
-    try:
-        return datetime.fromisoformat(raw.replace("Z", "+00:00")).date()
-    except (AttributeError, TypeError, ValueError) as exc:
-        raise ValueError(f"invalid session timestamp: {raw!r}") from exc
+    return _parse_timestamp(raw).date()
 
 
 def _normalize_value(value: str, msg: dict, predicate: str = "deadline") -> str:
@@ -360,4 +367,6 @@ def main(argv: Sequence[str] | None = None) -> int | None:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    from hydraclaim.cli import run_module
+
+    raise SystemExit(run_module("extract", main))
