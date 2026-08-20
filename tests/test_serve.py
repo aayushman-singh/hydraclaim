@@ -62,6 +62,36 @@ def test_dispatch_invalid_request_has_stable_error_code():
     }
 
 
+def test_dispatch_ingest_route_returns_stable_failure(monkeypatch):
+    monkeypatch.setattr(serve, "WRITE_KEY", "")
+    monkeypatch.setattr(
+        "hydraclaim.ingest_api.handle_ingest",
+        lambda body, db: (500, {"code": "ingest_failed", "error": "ingestion failed"}),
+    )
+
+    status, payload, extra = serve.dispatch(
+        "POST", "/ingest", {"text": "safe"}, FakeDB(), None
+    )
+
+    assert status == 500
+    assert payload == {"code": "ingest_failed", "error": "ingestion failed"}
+    assert extra is None
+
+
+def test_dispatch_slack_ingest_route_returns_stable_failure(monkeypatch):
+    monkeypatch.setattr(serve, "WRITE_KEY", "")
+    monkeypatch.setattr(
+        "hydraclaim.ingest_api.handle_ingest_slack",
+        lambda body, db: (500, {"code": "ingest_failed", "error": "ingestion failed"}),
+    )
+
+    status, payload, extra = serve.dispatch("POST", "/ingest/slack", [], FakeDB(), None)
+
+    assert status == 500
+    assert payload == {"code": "ingest_failed", "error": "ingestion failed"}
+    assert extra is None
+
+
 def test_dispatch_ask_requires_question():
     status, payload, _ = serve.dispatch("POST", "/ask", {}, None, None)
     assert status == 400

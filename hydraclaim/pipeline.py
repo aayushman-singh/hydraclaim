@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from hydraclaim.db import HydraDB
@@ -36,7 +37,11 @@ RETURN c.key AS id, e.name AS subject, c.predicate AS predicate,
     return rows
 
 
-def run_pipeline(db: HydraDB, doc: dict) -> dict:
+def run_pipeline(
+    db: HydraDB,
+    doc: dict,
+    step_hook: Callable[..., None] | None = None,
+) -> dict:
     scen = doc["scenario_id"]
     stats = {
         "scenario": scen,
@@ -47,16 +52,49 @@ def run_pipeline(db: HydraDB, doc: dict) -> dict:
         "duplicates": 0,
     }
     writer = GraphWriter(db)
-    for session in doc["sessions"]:
+    for session_index, session in enumerate(doc["sessions"]):
+        if step_hook:
+            step_hook(
+                "read_active",
+                session_index=session_index,
+                session_count=len(doc["sessions"]),
+            )
         active = fetch_active_claims(db)
+        if step_hook:
+            step_hook(
+                "extract",
+                session_index=session_index,
+                session_count=len(doc["sessions"]),
+                active_count=len(active),
+            )
         drafts, warnings = extract_session(session, doc["entities"], active)
         for warning in warnings:
             print(f"warn [{session['session_id']}]: {warning}", file=sys.stderr)
+        if step_hook:
+            step_hook(
+                "reconcile",
+                session_index=session_index,
+                session_count=len(doc["sessions"]),
+                active_count=len(active),
+                draft_count=len(drafts),
+            )
         plan = plan_writes(
             drafts, active, doc["entities"], id_prefix=f"{scen}:{session['session_id']}"
         )
         for warning in plan["warnings"]:
             print(f"warn [{session['session_id']}]: {warning}", file=sys.stderr)
+        if step_hook:
+            step_hook(
+                "graph_write",
+                session_index=session_index,
+                session_count=len(doc["sessions"]),
+                draft_count=len(drafts),
+                plan_create_count=len(plan["create"]),
+                plan_supersede_count=len(plan["supersede"]),
+                plan_contradict_count=len(plan["contradict"]),
+                plan_duplicate_count=plan["duplicates"],
+                applied=False,
+            )
         applied = writer.apply_plan(plan, scen, doc["entities"])
         stats["sessions"].append(
             {

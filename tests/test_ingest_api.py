@@ -7,6 +7,11 @@ import logging
 from hydraclaim import ingest_api, serve
 
 
+class EmptyDB:
+    def query(self, cypher, consistency="causal"):
+        return []
+
+
 def test_write_auth_no_key_configured(monkeypatch):
     """When HYDRACLAIM_WRITE_KEY is empty, write endpoints are open."""
     monkeypatch.setattr(serve, "WRITE_KEY", "")
@@ -110,5 +115,202 @@ def test_ingest_failure_logs_step_and_traceback(caplog, monkeypatch):
     assert status == 500
     assert payload == {"code": "ingest_failed", "error": "ingestion failed"}
     assert "step=extract" in caplog.text
+    assert "scenario=adhoc-" in caplog.text
+    assert "state=" in caplog.text
+    assert "exception_type=RuntimeError" in caplog.text
+    assert "input=" in caplog.text
     assert "Traceback" in caplog.text
     assert request["text"] not in caplog.text
+
+
+def test_preformatted_failure_logs_read_active_state(caplog, monkeypatch):
+    monkeypatch.setenv("LLM_API_KEY", "fake")
+
+    def raising_reader(db):
+        raise RuntimeError("active read failed")
+
+    monkeypatch.setattr("hydraclaim.pipeline.fetch_active_claims", raising_reader)
+    request = {
+        "scenario_id": "safe-scenario",
+        "sessions": [{"session_id": "session-1", "messages": []}],
+        "entities": [{"name": "Ada", "type": "person"}],
+    }
+
+    with caplog.at_level(logging.ERROR, logger="hydraclaim.ingest_api"):
+        status, payload = ingest_api.handle_ingest(request, EmptyDB())
+
+    assert status == 500
+    assert payload == {"code": "ingest_failed", "error": "ingestion failed"}
+    assert "step=read_active" in caplog.text
+    assert "scenario=safe-scenario" in caplog.text
+    assert "state=" in caplog.text
+    assert "session_index=0" in caplog.text
+    assert "session_count=1" in caplog.text
+    assert "exception_type=RuntimeError" in caplog.text
+    assert "Ada" not in caplog.text
+
+
+def test_preformatted_failure_logs_extract_state(caplog, monkeypatch):
+    monkeypatch.setenv("LLM_API_KEY", "fake")
+    monkeypatch.setattr("hydraclaim.pipeline.fetch_active_claims", lambda db: [])
+
+    def raising_extractor(session, entities, active):
+        raise RuntimeError("preformatted extraction failed")
+
+    monkeypatch.setattr("hydraclaim.pipeline.extract_session", raising_extractor)
+    request = {
+        "scenario_id": "extract-scenario",
+        "sessions": [{"session_id": "session-1", "messages": []}],
+        "entities": [],
+    }
+
+    with caplog.at_level(logging.ERROR, logger="hydraclaim.ingest_api"):
+        status, payload = ingest_api.handle_ingest(request, EmptyDB())
+
+    assert status == 500
+    assert payload["code"] == "ingest_failed"
+    assert "step=extract" in caplog.text
+    assert "active_count=0" in caplog.text
+    assert "exception_type=RuntimeError" in caplog.text
+
+
+def test_preformatted_failure_logs_reconcile_state(caplog, monkeypatch):
+    monkeypatch.setenv("LLM_API_KEY", "fake")
+    monkeypatch.setattr("hydraclaim.pipeline.fetch_active_claims", lambda db: [])
+    monkeypatch.setattr(
+        "hydraclaim.pipeline.extract_session",
+        lambda session, entities, active: ([], []),
+    )
+
+    def raising_reconciler(*args, **kwargs):
+        raise ValueError("reconcile failed")
+
+    monkeypatch.setattr("hydraclaim.pipeline.plan_writes", raising_reconciler)
+    request = {
+        "scenario_id": "reconcile-scenario",
+        "sessions": [{"session_id": "session-1", "messages": []}],
+        "entities": [],
+    }
+
+    with caplog.at_level(logging.ERROR, logger="hydraclaim.ingest_api"):
+        status, payload = ingest_api.handle_ingest(request, EmptyDB())
+
+    assert status == 500
+    assert payload["code"] == "ingest_failed"
+    assert "step=reconcile" in caplog.text
+    assert "draft_count=0" in caplog.text
+    assert "exception_type=ValueError" in caplog.text
+
+
+def test_preformatted_failure_logs_graph_write_state(caplog, monkeypatch):
+    monkeypatch.setenv("LLM_API_KEY", "fake")
+    monkeypatch.setattr("hydraclaim.pipeline.fetch_active_claims", lambda db: [])
+    monkeypatch.setattr(
+        "hydraclaim.pipeline.extract_session",
+        lambda session, entities, active: ([], []),
+    )
+    monkeypatch.setattr(
+        "hydraclaim.pipeline.plan_writes",
+        lambda *args, **kwargs: {
+            "create": [],
+            "supersede": [],
+            "contradict": [],
+            "duplicates": 0,
+            "warnings": [],
+        },
+    )
+
+    class RaisingWriter:
+        def __init__(self, db):
+            pass
+
+        def apply_plan(self, plan, scenario_id, entities):
+            raise RuntimeError("graph write failed")
+
+    monkeypatch.setattr("hydraclaim.pipeline.GraphWriter", RaisingWriter)
+    request = {
+        "scenario_id": "graph-scenario",
+        "sessions": [{"session_id": "session-1", "messages": []}],
+        "entities": [],
+    }
+
+    with caplog.at_level(logging.ERROR, logger="hydraclaim.ingest_api"):
+        status, payload = ingest_api.handle_ingest(request, EmptyDB())
+
+    assert status == 500
+    assert payload["code"] == "ingest_failed"
+    assert "step=graph_write" in caplog.text
+    assert "plan_create_count=0" in caplog.text
+    assert "applied=False" in caplog.text
+    assert "exception_type=RuntimeError" in caplog.text
+
+
+def test_preformatted_validation_failure_logs_validation_step(caplog, monkeypatch):
+    monkeypatch.setenv("LLM_API_KEY", "fake")
+    request = {
+        "scenario_id": "validation-scenario",
+        "sessions": "not a list",
+        "entities": [],
+    }
+
+    with caplog.at_level(logging.ERROR, logger="hydraclaim.ingest_api"):
+        status, payload = ingest_api.handle_ingest(request, EmptyDB())
+
+    assert status == 500
+    assert payload["code"] == "ingest_failed"
+    assert "step=validation" in caplog.text
+    assert "exception_type=ValueError" in caplog.text
+
+
+def test_slack_dict_failure_logs_message_count(caplog, monkeypatch):
+    monkeypatch.setenv("LLM_API_KEY", "fake")
+    monkeypatch.setattr(ingest_api, "_discover_entities_llm", lambda text: [])
+
+    def raising_extractor(session, entities, active):
+        raise ValueError("Slack extraction failed")
+
+    monkeypatch.setattr(ingest_api, "extract_session", raising_extractor)
+    message = {
+        "ts": "1716000000.000000",
+        "user_name": "Ada",
+        "text": "private source text",
+    }
+
+    with caplog.at_level(logging.ERROR, logger="hydraclaim.ingest_api"):
+        status, payload = ingest_api.handle_ingest_slack(
+            {"channel": "general", "messages": [message]}, EmptyDB()
+        )
+
+    assert status == 500
+    assert payload == {"code": "ingest_failed", "error": "ingestion failed"}
+    assert "step=extract" in caplog.text
+    assert "message_count=1" in caplog.text
+    assert "input_id=slack-dict" in caplog.text
+    assert "private source text" not in caplog.text
+
+
+def test_slack_bare_list_failure_logs_message_count_and_input_id(caplog, monkeypatch):
+    monkeypatch.setenv("LLM_API_KEY", "fake")
+    monkeypatch.setattr(ingest_api, "_discover_entities_llm", lambda text: [])
+
+    def raising_extractor(session, entities, active):
+        raise ValueError("Slack extraction failed")
+
+    monkeypatch.setattr(ingest_api, "extract_session", raising_extractor)
+    messages = [
+        {
+            "ts": "1716000000.000000",
+            "user_name": "Ada",
+            "text": "bare list source text",
+        }
+    ]
+
+    with caplog.at_level(logging.ERROR, logger="hydraclaim.ingest_api"):
+        status, payload = ingest_api.handle_ingest_slack(messages, EmptyDB())
+
+    assert status == 500
+    assert payload == {"code": "ingest_failed", "error": "ingestion failed"}
+    assert "step=extract" in caplog.text
+    assert "message_count=1" in caplog.text
+    assert "input_id=slack-list" in caplog.text
+    assert "bare list source text" not in caplog.text

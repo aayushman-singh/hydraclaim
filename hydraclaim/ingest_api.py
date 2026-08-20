@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import os
 import uuid
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
@@ -41,10 +42,17 @@ class IngestionError(RuntimeError):
 
 def _request_summary(body: Any) -> dict[str, Any]:
     """Return request metadata without source text or document contents."""
+    if isinstance(body, list):
+        return {
+            "input_id": "slack-list",
+            "type": "list",
+            "message_count": len(body),
+        }
     if not isinstance(body, dict):
-        return {"type": type(body).__name__}
+        return {"input_id": "unknown-input", "type": type(body).__name__}
 
-    summary: dict[str, Any] = {"fields": sorted(body)}
+    input_id = "slack-dict" if "messages" in body else "ingest-request"
+    summary: dict[str, Any] = {"input_id": input_id, "fields": sorted(body)}
     text = body.get("text")
     if isinstance(text, str):
         summary["text_length"] = len(text)
@@ -57,12 +65,30 @@ def _request_summary(body: Any) -> dict[str, Any]:
     return summary
 
 
-def _log_failure(step: str, scenario_id: str, request_summary: dict[str, Any]) -> None:
+@dataclass
+class _FailureContext:
+    request_summary: dict[str, Any]
+    step: str = "validate"
+    scenario_id: str = "unknown"
+    state: dict[str, Any] = field(default_factory=dict)
+
+    def mark(self, step: str, **state: Any) -> None:
+        self.step = step
+        self.state = {"phase": step, **state}
+
+
+def _key_value_summary(values: dict[str, Any]) -> str:
+    return " ".join(f"{key}={value}" for key, value in values.items())
+
+
+def _log_failure(context: _FailureContext, exc: Exception) -> None:
     logger.exception(
-        "ingest failed step=%s scenario=%s input=%r",
-        step,
-        scenario_id,
-        request_summary,
+        "ingest failed step=%s scenario=%s state=%s exception_type=%s input=%s",
+        context.step,
+        context.scenario_id,
+        _key_value_summary(context.state),
+        type(exc).__name__,
+        _key_value_summary(context.request_summary),
     )
 
 
@@ -117,14 +143,16 @@ def handle_ingest(body: dict, db: HydraDB) -> tuple[int, dict]:
     except IngestionError as e:
         return 503, {"code": "ingest_unavailable", "error": str(e)}
 
-    step = "validate"
-    scenario_id = "unknown"
-    request_summary = _request_summary(body)
+    context = _FailureContext(_request_summary(body))
     try:
         if "sessions" in body:
-            scenario_id = body.get("scenario_id", "upload-pending")
-            step = "pipeline"
-            return _ingest_preformatted(body, db)
+            context.scenario_id = body.get("scenario_id", "upload-pending")
+            context.mark(
+                "validate",
+                session_count=len(body.get("sessions", [])),
+                entity_count=len(body.get("entities", [])),
+            )
+            return _ingest_preformatted(body, db, context)
 
         text = (body.get("text") or "").strip()
         if not text:
@@ -142,50 +170,72 @@ def handle_ingest(body: dict, db: HydraDB) -> tuple[int, dict]:
 
         author = body.get("author", "unknown")
         channel = body.get("channel", "adhoc")
-        scenario_id = f"adhoc-{uuid.uuid4().hex[:8]}"
+        context.scenario_id = f"adhoc-{uuid.uuid4().hex[:8]}"
 
-        step = "discover"
+        context.mark("discover_entities", text_length=len(text))
         entities = _discover_entities_llm(text)
         session = _wrap_raw_text(text, source_kind, author, channel)
-        step = "fetch_active"
+        context.mark("read_active")
         active = fetch_active_claims(db)
+        context.mark("read_active", active_count=len(active))
 
-        step = "extract"
+        context.mark("extract", active_count=len(active))
         drafts, warnings = extract_session(session, entities, active)
+        context.mark("extract", active_count=len(active), draft_count=len(drafts))
         for i, d in enumerate(drafts):
-            d["id"] = f"{scenario_id}:x{i + 1}"
+            d["id"] = f"{context.scenario_id}:x{i + 1}"
 
-        step = "plan"
-        plan = plan_writes(drafts, active, entities, id_prefix=scenario_id)
+        context.mark("reconcile", active_count=len(active), draft_count=len(drafts))
+        plan = plan_writes(drafts, active, entities, id_prefix=context.scenario_id)
         warnings.extend(plan["warnings"])
-        step = "apply"
-        applied = apply_plan(db, plan, scenario_id, entities)
+        context.mark(
+            "graph_write",
+            draft_count=len(drafts),
+            plan_create_count=len(plan["create"]),
+            plan_supersede_count=len(plan["supersede"]),
+            plan_contradict_count=len(plan["contradict"]),
+            plan_duplicate_count=plan["duplicates"],
+            applied=False,
+        )
+        applied = apply_plan(db, plan, context.scenario_id, entities)
+        context.state["applied"] = True
 
         return 200, {
-            "scenario_id": scenario_id,
+            "scenario_id": context.scenario_id,
             "created": applied["created"],
             "superseded": applied["superseded"],
             "contradicted": applied["contradicted"],
             "duplicates": applied["duplicates"],
             "warnings": warnings,
         }
-    except Exception:
-        _log_failure(step, scenario_id, request_summary)
+    except Exception as exc:
+        _log_failure(context, exc)
         return 500, {"code": "ingest_failed", "error": "ingestion failed"}
 
 
-def _ingest_preformatted(body: dict, db: HydraDB) -> tuple[int, dict]:
+def _ingest_preformatted(
+    body: dict, db: HydraDB, context: _FailureContext
+) -> tuple[int, dict]:
     """Ingest a pre-formatted scenario document."""
     sessions = body.get("sessions", [])
     entities = body.get("entities", [])
     scenario_id = body.get("scenario_id", f"upload-{uuid.uuid4().hex[:8]}")
+    context.mark(
+        "validation",
+        session_count=len(sessions) if isinstance(sessions, list) else 0,
+        entity_count=len(entities) if isinstance(entities, list) else 0,
+    )
+    if not isinstance(sessions, list):
+        raise ValueError("sessions must be a list")
+    if not isinstance(entities, list):
+        raise ValueError("entities must be a list")
 
     doc = {
         "scenario_id": scenario_id,
         "sessions": sessions,
         "entities": entities,
     }
-    stats = run_pipeline(db, doc)
+    stats = run_pipeline(db, doc, step_hook=context.mark)
     return 200, stats
 
 
@@ -196,9 +246,7 @@ def handle_ingest_slack(body: Any, db: HydraDB) -> tuple[int, dict]:
     except IngestionError as e:
         return 503, {"code": "ingest_unavailable", "error": str(e)}
 
-    step = "validate"
-    scenario_id = "unknown"
-    request_summary = _request_summary(body)
+    context = _FailureContext(_request_summary(body))
     try:
         channel = (
             body.get("channel", "general") if isinstance(body, dict) else "general"
@@ -210,7 +258,8 @@ def handle_ingest_slack(body: Any, db: HydraDB) -> tuple[int, dict]:
                 "error": "expected a JSON array of Slack messages",
             }
 
-        step = "parse_slack"
+        context.mark("validate", message_count=len(messages))
+        context.mark("parse_slack", message_count=len(messages))
         sessions = parse_slack_export(messages, channel)
         if not sessions:
             return 400, {
@@ -218,43 +267,69 @@ def handle_ingest_slack(body: Any, db: HydraDB) -> tuple[int, dict]:
                 "error": "no messages found in Slack export",
             }
 
-        scenario_id = f"slack-{channel}-{uuid.uuid4().hex[:6]}"
-        step = "discover"
+        context.scenario_id = f"slack-{channel}-{uuid.uuid4().hex[:6]}"
+        context.mark("discover_entities", session_count=len(sessions))
         entities = _discover_entities_from_sessions(sessions)
         all_warnings: list[str] = []
         total = {"created": 0, "superseded": 0, "contradicted": 0, "duplicates": 0}
 
-        for session in sessions:
-            step = "fetch_active"
+        for session_index, session in enumerate(sessions):
+            context.mark(
+                "read_active",
+                session_index=session_index,
+                session_count=len(sessions),
+            )
             active = fetch_active_claims(db)
-            step = "extract"
+            context.mark(
+                "extract",
+                session_index=session_index,
+                session_count=len(sessions),
+                active_count=len(active),
+            )
             drafts, warnings = extract_session(session, entities, active)
             all_warnings.extend(warnings)
             for i, d in enumerate(drafts):
-                d["id"] = f"{scenario_id}:{session['session_id']}:x{i + 1}"
-            step = "plan"
+                d["id"] = f"{context.scenario_id}:{session['session_id']}:x{i + 1}"
+            context.mark(
+                "reconcile",
+                session_index=session_index,
+                session_count=len(sessions),
+                active_count=len(active),
+                draft_count=len(drafts),
+            )
             plan = plan_writes(
                 drafts,
                 active,
                 entities,
-                id_prefix=f"{scenario_id}:{session['session_id']}",
+                id_prefix=f"{context.scenario_id}:{session['session_id']}",
             )
             all_warnings.extend(plan["warnings"])
-            step = "apply"
-            applied = apply_plan(db, plan, scenario_id, entities)
+            context.mark(
+                "graph_write",
+                session_index=session_index,
+                session_count=len(sessions),
+                draft_count=len(drafts),
+                plan_create_count=len(plan["create"]),
+                plan_supersede_count=len(plan["supersede"]),
+                plan_contradict_count=len(plan["contradict"]),
+                plan_duplicate_count=plan["duplicates"],
+                applied=False,
+            )
+            applied = apply_plan(db, plan, context.scenario_id, entities)
+            context.state["applied"] = True
             total["created"] += applied["created"]
             total["superseded"] += applied["superseded"]
             total["contradicted"] += applied["contradicted"]
             total["duplicates"] += applied["duplicates"]
 
         return 200, {
-            "scenario_id": scenario_id,
+            "scenario_id": context.scenario_id,
             "sessions_processed": len(sessions),
             **total,
             "warnings": all_warnings,
         }
-    except Exception:
-        _log_failure(step, scenario_id, request_summary)
+    except Exception as exc:
+        _log_failure(context, exc)
         return 500, {"code": "ingest_failed", "error": "ingestion failed"}
 
 
