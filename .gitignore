@@ -17,8 +17,11 @@ demo/test-capture.mp4
 __pycache__/
 *.py[cod]
 .venv/
+.venv-package-test/
 .pytest_cache/
 *.egg-info/
+build/
+dist/
 
 # Secrets
 .env

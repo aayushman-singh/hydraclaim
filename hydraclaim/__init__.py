@@ -7,8 +7,6 @@ from __future__ import annotations
 
 import sys
 
-__version__ = "0.1.0"
-
 
 def _force_utf8_io() -> None:
     """Emit stdout/stderr as UTF-8, including when redirected.

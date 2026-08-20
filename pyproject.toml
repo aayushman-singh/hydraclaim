@@ -1,3 +1,7 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
 [project]
 name = "hydraclaim"
 version = "0.2.0"
@@ -40,8 +44,13 @@ dev = ["pytest>=8.0"]
 [project.scripts]
 hydraclaim = "hydraclaim.cli:main"
 
-[tool.setuptools.packages.find]
-include = ["hydraclaim*"]
+[tool.hatch.build.targets.wheel]
+packages = ["hydraclaim"]
 
-[tool.setuptools.package-data]
-hydraclaim = ["schema.cypher"]
+[tool.hatch.build.targets.sdist]
+exclude = [
+    "/tests",
+    "/build",
+    "/dist",
+    "/.venv-package-test",
+]
