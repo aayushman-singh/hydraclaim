@@ -39,7 +39,9 @@ def load_ground_truth(scenario_doc: dict) -> list[dict]:
     ]
 
 
-def evaluate(drafts: list[dict], scenario_doc: dict, roster: list[dict] | None = None) -> dict:
+def evaluate(
+    drafts: list[dict], scenario_doc: dict, roster: list[dict] | None = None
+) -> dict:
     roster = roster if roster is not None else scenario_doc.get("entities", [])
     gold = load_ground_truth(scenario_doc)
 
@@ -49,7 +51,8 @@ def evaluate(drafts: list[dict], scenario_doc: dict, roster: list[dict] | None =
     for draft in drafts:
         subject = canonicalize_entity(draft["subject"], roster)
         triple_hit = [
-            g for g in gold
+            g
+            for g in gold
             if normalize_value(g["subject"]) == normalize_value(subject)
             and g["predicate"] == draft["predicate"]
             and g["value_norm"] == normalize_value(draft["value"])
@@ -74,14 +77,22 @@ def evaluate(drafts: list[dict], scenario_doc: dict, roster: list[dict] | None =
     )
     per_predicate = {}
     for pred in predicates:
-        g_tp = sum(1 for k, d in matched_gold.items()
-                   if next(g for g in gold if g["key"] == k)["predicate"] == pred)
+        g_tp = sum(
+            1
+            for k, d in matched_gold.items()
+            if next(g for g in gold if g["key"] == k)["predicate"] == pred
+        )
         g_fn = sum(1 for g in gold if g["predicate"] == pred) - g_tp
         g_fp = sum(1 for d in spurious if d["predicate"] == pred)
         p = g_tp / (g_tp + g_fp) if g_tp + g_fp else 0.0
         r = g_tp / (g_tp + g_fn) if g_tp + g_fn else 0.0
-        per_predicate[pred] = {"precision": round(p, 3), "recall": round(r, 3),
-                               "tp": g_tp, "fp": g_fp, "fn": g_fn}
+        per_predicate[pred] = {
+            "precision": round(p, 3),
+            "recall": round(r, 3),
+            "tp": g_tp,
+            "fp": g_fp,
+            "fn": g_fn,
+        }
 
     links = [(g["key"], g["supersedes"]) for g in gold if g["supersedes"]]
     supersession_recall = None
@@ -89,7 +100,11 @@ def evaluate(drafts: list[dict], scenario_doc: dict, roster: list[dict] | None =
         hits = 0
         for key, target in links:
             draft, target_draft = matched_gold.get(key), matched_gold.get(target)
-            if draft and target_draft and draft.get("supersedes") == target_draft.get("id"):
+            if (
+                draft
+                and target_draft
+                and draft.get("supersedes") == target_draft.get("id")
+            ):
                 hits += 1
         supersession_recall = hits / len(links)
 
@@ -97,15 +112,23 @@ def evaluate(drafts: list[dict], scenario_doc: dict, roster: list[dict] | None =
         "scenario": scenario_doc["scenario_id"],
         "claims_gold": len(gold),
         "claims_extracted": len(drafts),
-        "tp": tp, "fp": fp, "fn": fn, "duplicates": duplicates,
+        "tp": tp,
+        "fp": fp,
+        "fn": fn,
+        "duplicates": duplicates,
         "precision": round(precision, 3),
         "recall": round(recall, 3),
         "f1": round(f1, 3),
-        "supersession_recall": (round(supersession_recall, 3)
-                                if supersession_recall is not None else None),
+        "supersession_recall": (
+            round(supersession_recall, 3) if supersession_recall is not None else None
+        ),
         "per_predicate": per_predicate,
-        "unmatched_gold": [k for k in (g["key"] for g in gold) if k not in matched_gold],
-        "spurious": [f"{d['subject']} | {d['predicate']} | {d['value']}" for d in spurious],
+        "unmatched_gold": [
+            k for k in (g["key"] for g in gold) if k not in matched_gold
+        ],
+        "spurious": [
+            f"{d['subject']} | {d['predicate']} | {d['value']}" for d in spurious
+        ],
     }
 
 
@@ -120,15 +143,21 @@ def main() -> None:
     report = evaluate(drafts, doc)
 
     print(f"scenario: {report['scenario']}")
-    print(f"claims:   {report['claims_extracted']} extracted / {report['claims_gold']} gold")
-    print(f"precision {report['precision']:.3f}   recall {report['recall']:.3f}   "
-          f"f1 {report['f1']:.3f}   duplicates {report['duplicates']}")
+    print(
+        f"claims:   {report['claims_extracted']} extracted / {report['claims_gold']} gold"
+    )
+    print(
+        f"precision {report['precision']:.3f}   recall {report['recall']:.3f}   "
+        f"f1 {report['f1']:.3f}   duplicates {report['duplicates']}"
+    )
     if report["supersession_recall"] is not None:
         print(f"supersession recall: {report['supersession_recall']:.3f}")
     print("\nper predicate:")
     for pred, m in report["per_predicate"].items():
-        print(f"  {pred:<14} p={m['precision']:.3f} r={m['recall']:.3f} "
-              f"(tp {m['tp']}, fp {m['fp']}, fn {m['fn']})")
+        print(
+            f"  {pred:<14} p={m['precision']:.3f} r={m['recall']:.3f} "
+            f"(tp {m['tp']}, fp {m['fp']}, fn {m['fn']})"
+        )
     if report["unmatched_gold"]:
         print(f"\nmissed gold claims: {', '.join(report['unmatched_gold'])}")
     if report["spurious"]:

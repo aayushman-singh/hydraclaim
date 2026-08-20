@@ -41,7 +41,7 @@ KIND_DEFAULT: dict[str, float] = {
 }
 
 AUTHOR_BASE: dict[str, float] = {
-    "linear": 0.9,    # system-of-record entries
+    "linear": 0.9,  # system-of-record entries
     "meeting": 0.85,  # official notes
 }
 

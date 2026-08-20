@@ -76,8 +76,9 @@ def evidence_props(claim: dict, cid: str) -> dict:
     }
 
 
-def entity_props(scenario: str, name: str, etype: str = "unknown",
-                 aliases: list[str] | None = None) -> dict:
+def entity_props(
+    scenario: str, name: str, etype: str = "unknown", aliases: list[str] | None = None
+) -> dict:
     key = entity_key(scenario, name)
     return {
         "id": graph_id(key),

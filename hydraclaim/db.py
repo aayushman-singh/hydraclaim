@@ -54,7 +54,11 @@ class HydraDB:
     def query(self, cypher: str, consistency: str = "causal") -> list[dict[str, Any]]:
         resp = self._client.post(
             f"/v1/graphs/{self._graph_id}/query",
-            json={"cell_id": self._cell_id, "query": cypher, "consistency": consistency},
+            json={
+                "cell_id": self._cell_id,
+                "query": cypher,
+                "consistency": consistency,
+            },
         )
         if resp.status_code != 200:
             raise HydraDBError(
@@ -73,11 +77,15 @@ class HydraDB:
         if not isinstance(rows, list):
             raise HydraDBError(f"unexpected response shape: {str(payload)[:500]}")
         return [
-            {k: unwrap(v) for k, v in row.items()} if isinstance(row, dict) else unwrap(row)
+            {k: unwrap(v) for k, v in row.items()}
+            if isinstance(row, dict)
+            else unwrap(row)
             for row in rows
         ]
 
-    def query_one(self, cypher: str, consistency: str = "causal") -> dict[str, Any] | None:
+    def query_one(
+        self, cypher: str, consistency: str = "causal"
+    ) -> dict[str, Any] | None:
         rows = self.query(cypher, consistency=consistency)
         return rows[0] if rows else None
 

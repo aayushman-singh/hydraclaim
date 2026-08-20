@@ -1,10 +1,10 @@
 """Render a text file as a scrolling terminal video (1920x1080, 30 fps)."""
+
 from __future__ import annotations
 
 import argparse
 import shutil
 import subprocess
-import sys
 import textwrap
 from pathlib import Path
 
@@ -23,7 +23,6 @@ def render_terminal_video(
     bold = ImageFont.truetype("C:/Windows/Fonts/consolab.ttf", 22)
     margin = 40
     line_h = 26
-    max_w = width - 2 * margin
     # Number of lines that fit on screen; keep a couple spare.
     visible_lines = (height - 2 * margin) // line_h - 2
 
@@ -34,18 +33,20 @@ def render_terminal_video(
         if len(line) <= 180:
             chunks = [line]
         else:
-            chunks = textwrap.wrap(line, width=180, replace_whitespace=False,
-                                   drop_whitespace=False) or [line]
+            chunks = textwrap.wrap(
+                line, width=180, replace_whitespace=False, drop_whitespace=False
+            ) or [line]
         for i, chunk in enumerate(chunks):
             # Mark banner/header lines in bold.
-            is_bold = chunk.startswith("=") or chunk.startswith("-") or chunk.startswith("|")
+            is_bold = (
+                chunk.startswith("=") or chunk.startswith("-") or chunk.startswith("|")
+            )
             wrapped.append((chunk, is_bold))
 
     # Show each line for a fraction of the requested duration.
     total_lines = max(len(wrapped), 1)
     seconds_per_line = duration / total_lines
     frames_per_line = max(int(round(seconds_per_line * fps)), 1)
-    total_frames = total_lines * frames_per_line
 
     # Build frame buffer progressively so the terminal scrolls as lines appear.
     buf: list[tuple[str, bool]] = []
@@ -55,10 +56,27 @@ def render_terminal_video(
         raise RuntimeError("ffmpeg not found")
 
     cmd = [
-        ffmpeg, "-y", "-f", "rawvideo", "-vcodec", "rawvideo",
-        "-s", f"{width}x{height}", "-pix_fmt", "rgb24", "-r", str(fps),
-        "-i", "-", "-c:v", "libx264", "-pix_fmt", "yuv420p",
-        "-preset", "fast", str(out_path),
+        ffmpeg,
+        "-y",
+        "-f",
+        "rawvideo",
+        "-vcodec",
+        "rawvideo",
+        "-s",
+        f"{width}x{height}",
+        "-pix_fmt",
+        "rgb24",
+        "-r",
+        str(fps),
+        "-i",
+        "-",
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        "-preset",
+        "fast",
+        str(out_path),
     ]
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
     if proc.stdin is None:
@@ -76,7 +94,11 @@ def render_terminal_video(
         y = margin
         for line, is_bold in view:
             color = green if line.startswith("$") or line.startswith(">") else fg
-            if line.startswith("wrote") or line.startswith("scenario:") or line.startswith("precision"):
+            if (
+                line.startswith("wrote")
+                or line.startswith("scenario:")
+                or line.startswith("precision")
+            ):
                 color = gray
             f = bold if is_bold else font
             draw.text((margin, y), line, font=f, fill=color)

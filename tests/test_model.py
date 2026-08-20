@@ -73,8 +73,9 @@ class TestClaimProps:
 
 class TestEntityProps:
     def test_aliases_stored_pipe_delimited(self):
-        props = entity_props("payments", "Payments Integration", "system",
-                             ["payments", "payments-int"])
+        props = entity_props(
+            "payments", "Payments Integration", "system", ["payments", "payments-int"]
+        )
         assert props["aliases"] == "payments|payments-int"
         assert props["id"] == graph_id("payments:payments-integration")
 

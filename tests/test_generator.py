@@ -1,5 +1,3 @@
-import json
-
 from hydraclaim.generate.generator import BASE_DATE, expand_scenario, write_dataset
 from hydraclaim.generate.scenarios import deadline_drift, payments_owner_conflict
 
@@ -23,7 +21,14 @@ def test_sessions_and_messages_are_well_formed():
         ts = [m["ts"] for m in session["messages"]]
         assert ts == sorted(ts), "messages must be chronological"
         for msg in session["messages"]:
-            assert {"msg_id", "ts", "author", "source_kind", "channel", "text"} <= msg.keys()
+            assert {
+                "msg_id",
+                "ts",
+                "author",
+                "source_kind",
+                "channel",
+                "text",
+            } <= msg.keys()
 
 
 def test_every_claim_quote_is_grounded_in_a_message():
@@ -61,7 +66,9 @@ def test_conflict_is_unresolved_and_bidirectional_targets_exist():
     doc = _doc(payments_owner_conflict())
     claims = {c["key"]: c for c in doc["ground_truth"]["claims"]}
     assert claims["pay-own-3"]["contradicts_with"] == ["pay-own-2"]
-    assert claims["pay-own-3"]["status"] == "active", "conflict claim must not be superseded"
+    assert claims["pay-own-3"]["status"] == "active", (
+        "conflict claim must not be superseded"
+    )
     assert claims["pay-own-2"]["status"] == "active"
 
 

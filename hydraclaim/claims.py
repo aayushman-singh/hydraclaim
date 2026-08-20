@@ -44,12 +44,12 @@ SOURCE_KINDS = frozenset({"slack", "linear", "meeting", "chat"})
 
 QUESTION_TYPES = frozenset(
     {
-        "lookup",           # single-fact current-state question
-        "temporal",         # "what was true at / before T"
-        "knowledge_update", # answer is the latest in a supersession chain
-        "conflict",         # requires surfacing unresolved contradictions
-        "multi_session",    # synthesizes facts from multiple sessions
-        "abstention",       # answer is not in the history
+        "lookup",  # single-fact current-state question
+        "temporal",  # "what was true at / before T"
+        "knowledge_update",  # answer is the latest in a supersession chain
+        "conflict",  # requires surfacing unresolved contradictions
+        "multi_session",  # synthesizes facts from multiple sessions
+        "abstention",  # answer is not in the history
     }
 )
 
@@ -109,11 +109,17 @@ def validate_scenario(spec: dict) -> list[str]:
             errors.append(f"unknown qtype: {qa['qtype']}")
         if qa["qtype"] == "abstention":
             if qa["gold_claim_keys"]:
-                errors.append(f"abstention question has gold claims: {qa['question']!r}")
+                errors.append(
+                    f"abstention question has gold claims: {qa['question']!r}"
+                )
             if qa["answer"] != "ABSTAIN":
-                errors.append(f"abstention question without ABSTAIN answer: {qa['question']!r}")
+                errors.append(
+                    f"abstention question without ABSTAIN answer: {qa['question']!r}"
+                )
         else:
             for ref in qa["gold_claim_keys"]:
                 if ref not in claim_keys:
-                    errors.append(f"qa references unknown claim {ref}: {qa['question']!r}")
+                    errors.append(
+                        f"qa references unknown claim {ref}: {qa['question']!r}"
+                    )
     return errors

@@ -30,5 +30,9 @@ def to_cypher_literal(value: Any) -> str:
     if isinstance(value, (list, tuple)):
         return "[" + ", ".join(to_cypher_literal(v) for v in value) + "]"
     if isinstance(value, dict):
-        return "{" + ", ".join(f"{k}: {to_cypher_literal(v)}" for k, v in value.items()) + "}"
+        return (
+            "{"
+            + ", ".join(f"{k}: {to_cypher_literal(v)}" for k, v in value.items())
+            + "}"
+        )
     raise TypeError(f"cannot serialize {type(value).__name__} to a Cypher literal")

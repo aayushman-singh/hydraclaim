@@ -1,4 +1,5 @@
 """Generate title/info cards for the demo video."""
+
 from PIL import Image, ImageDraw, ImageFont
 from pathlib import Path
 
@@ -24,14 +25,18 @@ def make_card(lines, title=None, font_size=32, title_size=56):
     return img
 
 
-intro = make_card([
-    "Graph memory that tracks conflicts, supersession, and abstention",
-    "",
-    "Local stack:",
-    "  • LLM: llama.cpp  qwen3:8b  (CUDA)",
-    "  • Graph: HydraDB via Docker",
-    "  • Code: github.com/aayushman-singh/hydraclaim",
-], title="HydraClaim", font_size=36)
+intro = make_card(
+    [
+        "Graph memory that tracks conflicts, supersession, and abstention",
+        "",
+        "Local stack:",
+        "  • LLM: llama.cpp  qwen3:8b  (CUDA)",
+        "  • Graph: HydraDB via Docker",
+        "  • Code: github.com/aayushman-singh/hydraclaim",
+    ],
+    title="HydraClaim",
+    font_size=36,
+)
 intro.save(DEMO / "intro.png")
 
 # Schema card: first 38 lines of schema.cypher
@@ -51,15 +56,22 @@ Router + Graph Probe       |   1.000  |  1.000 / 1.000 |     4.7   |  71.1
 
 The graph probe turns vague coverage into a measurable signal,
 so the system abstains, goes cheap, or goes deep — exactly when it should."""
-bench = make_card(bench_text.splitlines(), title="Ablation results", font_size=26, title_size=44)
+bench = make_card(
+    bench_text.splitlines(), title="Ablation results", font_size=26, title_size=44
+)
 bench.save(DEMO / "benchmark.png")
 
-outro = make_card([
-    "HydraClaim",
-    "github.com/aayushman-singh/hydraclaim",
-    "",
-    "Built end-to-end with a local LLM on llama.cpp",
-], title="Thanks", font_size=40, title_size=56)
+outro = make_card(
+    [
+        "HydraClaim",
+        "github.com/aayushman-singh/hydraclaim",
+        "",
+        "Built end-to-end with a local LLM on llama.cpp",
+    ],
+    title="Thanks",
+    font_size=40,
+    title_size=56,
+)
 outro.save(DEMO / "outro.png")
 
 print("cards generated")

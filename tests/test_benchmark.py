@@ -17,16 +17,28 @@ def test_router_only_route_maps_lookup_to_fast():
 
 
 def test_router_only_route_maps_other_types_to_deep():
-    for qtype in ("temporal", "conflict", "knowledge_update", "multi_session", "abstention"):
+    for qtype in (
+        "temporal",
+        "conflict",
+        "knowledge_update",
+        "multi_session",
+        "abstention",
+    ):
         assert router_only_route(qtype) == ROUTE_DEEP
 
 
 def test_correct_abstention_when_route_is_abstain():
-    assert correct({"route": "ABSTAIN", "answer": "declined"}, "ABSTAIN", "abstention") is True
+    assert (
+        correct({"route": "ABSTAIN", "answer": "declined"}, "ABSTAIN", "abstention")
+        is True
+    )
 
 
 def test_correct_abstention_when_answered_is_false():
-    assert correct({"route": "FAST", "answer": "some answer"}, "ABSTAIN", "abstention") is False
+    assert (
+        correct({"route": "FAST", "answer": "some answer"}, "ABSTAIN", "abstention")
+        is False
+    )
 
 
 def test_correct_substring_match_ignores_case_and_punctuation():
@@ -35,7 +47,10 @@ def test_correct_substring_match_ignores_case_and_punctuation():
 
 
 def test_correct_substring_match_finds_date_inside_sentence():
-    result = {"route": "DEEP", "answer": "The deadline moved to 2026-10-17 per the latest update."}
+    result = {
+        "route": "DEEP",
+        "answer": "The deadline moved to 2026-10-17 per the latest update.",
+    }
     assert correct(result, "2026-10-17", "knowledge_update") is True
 
 
@@ -152,7 +167,11 @@ def test_run_arm_uses_forced_route_for_always_deep():
         {
             "ground_truth": {
                 "qa": [
-                    {"question": "Who owns payments?", "answer": "Priya Shah", "qtype": "lookup"},
+                    {
+                        "question": "Who owns payments?",
+                        "answer": "Priya Shah",
+                        "qtype": "lookup",
+                    },
                 ]
             }
         }
@@ -210,14 +229,17 @@ def test_run_arm_router_only_uses_structured_route_for_abstain():
 def test_correct_with_rubric_requires_all_items():
     result = {
         "route": "DEEP",
-        "answer": ("Unresolved conflict about payments integration — owned_by:\n"
-                   "  - Priya Shah — linear/Linear, 2026-05-21\n"
-                   "  - Dario Kim — slack/Dario Kim, 2026-05-14\n"
-                   "The highest-trust record says Priya Shah."),
+        "answer": (
+            "Unresolved conflict about payments integration — owned_by:\n"
+            "  - Priya Shah — linear/Linear, 2026-05-21\n"
+            "  - Dario Kim — slack/Dario Kim, 2026-05-14\n"
+            "The highest-trust record says Priya Shah."
+        ),
     }
     rubric = ["unresolved conflict", "Dario Kim", "Priya Shah"]
-    assert correct(result, "a long gold sentence that never appears verbatim",
-                   "conflict", rubric)
+    assert correct(
+        result, "a long gold sentence that never appears verbatim", "conflict", rubric
+    )
 
 
 def test_correct_with_rubric_rejects_partial_coverage():
@@ -253,12 +275,24 @@ def test_naive_answer_returns_top_overlapping_claim():
     class _ClaimDB:
         def query(self, cypher, consistency="causal"):
             return [
-                {"predicate": "deadline", "value": "2026-10-17", "status": "active", "valid_from": "2026-05-18"},
-                {"predicate": "deadline", "value": "2026-10-03", "status": "active", "valid_from": "2026-05-05"},
+                {
+                    "predicate": "deadline",
+                    "value": "2026-10-17",
+                    "status": "active",
+                    "valid_from": "2026-05-18",
+                },
+                {
+                    "predicate": "deadline",
+                    "value": "2026-10-03",
+                    "status": "active",
+                    "valid_from": "2026-05-05",
+                },
             ]
 
     roster = [{"name": "product launch", "aliases": ["launch"]}]
-    result = naive_answer(CountingDB(_ClaimDB()), "What is the current launch deadline?", roster)
+    result = naive_answer(
+        CountingDB(_ClaimDB()), "What is the current launch deadline?", roster
+    )
     assert result["route"] == ROUTE_NAIVE_RAG
     assert "2026-10-17" in result["answer"]
 
@@ -271,6 +305,8 @@ def test_naive_answer_abstains_when_no_active_claims():
             return []
 
     roster = [{"name": "product launch", "aliases": ["launch"]}]
-    result = naive_answer(CountingDB(_EmptyClaimDB()), "What is the launch deadline?", roster)
+    result = naive_answer(
+        CountingDB(_EmptyClaimDB()), "What is the launch deadline?", roster
+    )
     assert result["route"] == ROUTE_NAIVE_RAG
     assert "No active claims" in result["answer"]

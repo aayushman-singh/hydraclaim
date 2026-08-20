@@ -79,19 +79,13 @@ def test_all_mapped_qtypes_are_valid_question_types():
 
 def test_estimate_tokens_arithmetic():
     doc = convert_instance(_fixture_instance())
-    text_len = sum(
-        len(msg["text"])
-        for s in doc["sessions"]
-        for msg in s["messages"]
-    )
+    text_len = sum(len(msg["text"]) for s in doc["sessions"] for msg in s["messages"])
     assert estimate_tokens(doc) == text_len // 4
     assert estimate_tokens({"sessions": []}) == 0
 
 
 def test_sample_instances_is_deterministic():
-    instances = [
-        {"question_type": "lookup", "id": f"l{i}"} for i in range(6)
-    ] + [
+    instances = [{"question_type": "lookup", "id": f"l{i}"} for i in range(6)] + [
         {"question_type": "temporal-reasoning", "id": f"t{i}"} for i in range(6)
     ]
     first = sample_instances(instances, n=5, seed=123, per_type_cap=3)
@@ -100,10 +94,9 @@ def test_sample_instances_is_deterministic():
 
 
 def test_sample_instances_respects_per_type_caps_when_no_refill():
-    instances = (
-        [{"question_type": "lookup", "id": f"l{i}"} for i in range(6)]
-        + [{"question_type": "temporal-reasoning", "id": f"t{i}"} for i in range(6)]
-    )
+    instances = [{"question_type": "lookup", "id": f"l{i}"} for i in range(6)] + [
+        {"question_type": "temporal-reasoning", "id": f"t{i}"} for i in range(6)
+    ]
     sampled = sample_instances(instances, n=5, seed=1, per_type_cap=3)
     assert len(sampled) == 5
     by_type = {}
@@ -114,9 +107,7 @@ def test_sample_instances_respects_per_type_caps_when_no_refill():
 
 
 def test_sample_instances_refills_from_leftovers_to_reach_n():
-    instances = [
-        {"question_type": "lookup", "id": f"l{i}"} for i in range(6)
-    ] + [
+    instances = [{"question_type": "lookup", "id": f"l{i}"} for i in range(6)] + [
         {"question_type": "temporal-reasoning", "id": f"t{i}"} for i in range(6)
     ]
     sampled = sample_instances(instances, n=7, seed=1, per_type_cap=3)
@@ -134,5 +125,11 @@ def test_date_parsing_accepts_slashes_and_dashes():
     dash["haystack_sessions"] = dash["haystack_sessions"][:1]
     dash["haystack_session_ids"] = dash["haystack_session_ids"][:1]
 
-    assert convert_instance(slash)["sessions"][0]["started_at"] == "2023-05-01T09:00:00+00:00"
-    assert convert_instance(dash)["sessions"][0]["started_at"] == "2023-05-01T09:00:00+00:00"
+    assert (
+        convert_instance(slash)["sessions"][0]["started_at"]
+        == "2023-05-01T09:00:00+00:00"
+    )
+    assert (
+        convert_instance(dash)["sessions"][0]["started_at"]
+        == "2023-05-01T09:00:00+00:00"
+    )
