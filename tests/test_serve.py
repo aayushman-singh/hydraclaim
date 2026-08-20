@@ -479,7 +479,17 @@ def test_http_ask_passes_llm_classification_mode_to_retrieval(monkeypatch):
     assert seen["classification_mode"] == "llm"
 
 
-def test_handle_scenarios_reads_generated_data():
+def test_handle_scenarios_reads_generated_data(tmp_path, monkeypatch):
+    scenario = {
+        "scenario_id": "deadline_drift",
+        "description": "The deadline changes.",
+        "ground_truth": {"qa": [{"question": "When is the deadline?"}]},
+    }
+    (tmp_path / "deadline_drift.json").write_text(
+        json.dumps(scenario), encoding="utf-8"
+    )
+    monkeypatch.setattr(serve, "DATA_DIR", tmp_path)
+
     payload = serve.handle_scenarios()
     ids = {s["id"] for s in payload["scenarios"]}
     assert "deadline_drift" in ids
