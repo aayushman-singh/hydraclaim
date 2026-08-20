@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import re
 
 import pytest
 
 from hydraclaim.claim_read import ClaimReadLimitError, ClaimReader, ClaimScope
+from hydraclaim.errors import GraphIntegrityError
 
 
 NOW = datetime(2026, 8, 20, tzinfo=timezone.utc)
@@ -116,6 +118,23 @@ class _RelationDB:
             {"new_id": 1, "old_id": 2},
             {"new_id": 1, "old_id": 99},
         ]
+
+
+class _HighFanoutRelationDB(_RelationDB):
+    def query(self, cypher: str, consistency: str = "causal") -> list[dict]:
+        self.queries.append(cypher)
+        if "RETURN c.id AS id, e.name AS subject, c.predicate AS predicate" in cypher:
+            claim_id = int(cypher.split("{id: ", 1)[1].split("}", 1)[0])
+            return [
+                {"id": claim_id, "subject": "product launch", "predicate": "deadline"}
+            ]
+        if "{id: 1}" in cypher:
+            return [
+                {"new_id": 1, "old_id": 2},
+                {"new_id": 1, "old_id": 3},
+                {"new_id": 1, "old_id": 4},
+            ]
+        return []
 
 
 class _LimitDB:
@@ -296,12 +315,90 @@ class _CycleChainDB:
         ]
 
 
+class _AsOfDB:
+    def __init__(self) -> None:
+        self.queries: list[str] = []
+        self.claims = [
+            {
+                "id": 1,
+                "key": "old",
+                "subject": "product launch",
+                "predicate": "deadline",
+                "value": "2026-10-01",
+                "valid_from": "2026-07-01",
+                "valid_to": "",
+                "status": "active",
+                "recorded_at": "2026-07-01T00:00:00+00:00",
+            },
+            {
+                "id": 2,
+                "key": "future",
+                "subject": "product launch",
+                "predicate": "deadline",
+                "value": "2026-11-01",
+                "valid_from": "2026-09-01",
+                "valid_to": "",
+                "status": "active",
+                "recorded_at": "2026-09-01T00:00:00+00:00",
+            },
+        ]
+
+    def query(self, cypher: str, consistency: str = "causal") -> list[dict]:
+        self.queries.append(cypher)
+        if "MATCH (e:Entity)" in cypher:
+            return [{"id": 100, "name": "product launch", "aliases": "launch"}]
+        if "RETURN c.id AS id, e.name AS subject, c.predicate AS predicate" in cypher:
+            match = re.search(r"c:Claim \{id: (\d+)\}", cypher)
+            claim_id = int(match.group(1)) if match else None
+            return (
+                [
+                    {
+                        "id": claim_id,
+                        "subject": "product launch",
+                        "predicate": "deadline",
+                    }
+                ]
+                if claim_id in {claim["id"] for claim in self.claims}
+                else []
+            )
+        if "c.key AS key" in cypher:
+            rows = list(self.claims)
+            if "c.recorded_at <= '2026-08-01'" in cypher:
+                rows = [row for row in rows if row["recorded_at"] <= "2026-08-01"]
+            if "c.status = 'active'" in cypher:
+                rows = [row for row in rows if row["status"] == "active"]
+            return rows
+        if "SUPERSEDES" in cypher or "CONTRADICTS" in cypher:
+            return []
+        raise AssertionError(f"unexpected query: {cypher[:120]}")
+
+
 def test_answer_returns_structured_abstention():
     result = ClaimReader(_FakeDB()).answer("Who owns unknown?", now=NOW)
 
     assert result.route == "ABSTAIN"
     assert result.citations == ()
     assert result.classification is not None
+
+
+def test_historical_answer_excludes_future_recorded_claims():
+    db = _AsOfDB()
+    result = ClaimReader(db).answer(
+        "What is the launch deadline?",
+        classification_mode="llm",
+        llm_fn=lambda question: {
+            "subject": "product launch",
+            "predicate": "deadline",
+            "question_type": "lookup",
+            "as_of": "2026-08-01",
+        },
+    )
+
+    assert result.citations[0].value == "2026-10-01"
+    assert "2026-11-01" not in result.text
+    claim_reads = [query for query in db.queries if "c.key AS key" in query]
+    assert claim_reads
+    assert all("2026-08-01" in query for query in claim_reads)
 
 
 def test_probe_queries_limit_relations_to_selected_claims():
@@ -424,7 +521,7 @@ def test_chain_scope_constrains_start_and_older_claims_and_orders_ties():
     assert "current.predicate" in query
     assert "older.predicate" in query
     assert "ORDER BY older.valid_from DESC, older.id DESC" in query
-    assert query.count("MATCH") == 1
+    assert query.count("MATCH") == 3
     assert " IN [" not in query
     assert ", (" not in query
     assert "SUPERSEDES*" not in query
@@ -439,13 +536,23 @@ def test_relation_reads_filter_unselected_endpoints():
 
     assert relations == ({"new_id": 1, "old_id": 2},)
     assert db.queries
-    assert all(query.count("MATCH") == 1 for query in db.queries)
-    assert all(" IN [" not in query for query in db.queries)
-    assert all(", (" not in query for query in db.queries)
     relation_queries = [query for query in db.queries if "SUPERSEDES" in query]
     assert relation_queries
+    assert all(" IN [1, 2]" in query for query in relation_queries)
+    assert all("LIMIT 26" in query for query in relation_queries)
+    assert all(", (" not in query for query in db.queries)
     assert all("a:Claim {id:" in query for query in relation_queries)
     assert all("ABOUT" not in query for query in relation_queries)
+
+
+def test_relation_reads_raise_on_total_high_fanout():
+    db = _HighFanoutRelationDB()
+    with pytest.raises(ClaimReadLimitError, match="claim relation limit exceeded"):
+        ClaimReader(db).read_relations(
+            ClaimScope("product launch", "deadline", limit=2),
+            {1, 2, 3, 4},
+            "SUPERSEDES",
+        )
 
 
 def test_read_claims_fails_loudly_when_limit_is_exceeded():
@@ -461,7 +568,9 @@ def test_chain_rejects_cross_subject_and_cross_predicate_adapter_rows():
     chain = ClaimReader(db).read_chain(10, ClaimScope("product launch", "deadline"))
 
     assert [row["id"] for row in chain] == [11]
-    assert all(query.count("MATCH") == 1 for query in db.queries)
+    chain_queries = [query for query in db.queries if "RETURN older.id AS id" in query]
+    assert chain_queries
+    assert all(query.count("MATCH") == 3 for query in chain_queries)
     assert all(" IN [" not in query for query in db.queries)
     assert all(", (" not in query for query in db.queries)
     assert any("[:ABOUT]" in query and "{id: 11}" in query for query in db.queries)
@@ -493,8 +602,80 @@ def test_chain_stops_at_out_of_scope_intermediate_claim():
 
 def test_chain_is_cycle_safe():
     db = _CycleChainDB()
+    with pytest.raises(GraphIntegrityError, match="supersession cycle"):
+        ClaimReader(db).read_chain(10, ClaimScope("product launch", "deadline"))
 
-    chain = ClaimReader(db).read_chain(10, ClaimScope("product launch", "deadline"))
 
-    assert [row["id"] for row in chain] == [11]
-    assert len([query for query in db.queries if "-[:SUPERSEDES]->" in query]) == 2
+def test_chain_reads_raise_on_high_fanout_one_hop():
+    db = _CrossScopeChainDB()
+    with pytest.raises(
+        ClaimReadLimitError, match="claim chain relation limit exceeded"
+    ):
+        ClaimReader(db).read_chain(
+            10, ClaimScope("product launch", "deadline", limit=2)
+        )
+
+
+def test_chain_depth_rejects_a_cycle_without_recursion():
+    from hydraclaim.claim_read import _chain_depth
+
+    with pytest.raises(GraphIntegrityError, match="supersession cycle"):
+        _chain_depth([(1, 2), (2, 1)], {1, 2})
+
+
+class _RelationLimitDB:
+    def query(self, cypher: str, consistency: str = "causal") -> list[dict]:
+        if "RETURN c.id AS id, e.name AS subject, c.predicate AS predicate" in cypher:
+            return [{"id": 1, "subject": "product launch", "predicate": "deadline"}]
+        if "SUPERSEDES" in cypher:
+            return [
+                {"new_id": 1, "old_id": 2},
+                {"new_id": 1, "old_id": 3},
+                {"new_id": 1, "old_id": 4},
+            ]
+        return []
+
+
+def test_relation_reads_fail_on_high_fanout_after_limit_plus_one():
+    with pytest.raises(ClaimReadLimitError, match="relation limit"):
+        ClaimReader(_RelationLimitDB()).read_relations(
+            ClaimScope("product launch", "deadline", limit=2), {1}, "SUPERSEDES"
+        )
+
+
+class _ChainLimitDB:
+    def query(self, cypher: str, consistency: str = "causal") -> list[dict]:
+        if "RETURN c.id AS id, e.name AS subject, c.predicate AS predicate" in cypher:
+            return [{"id": 1, "subject": "product launch", "predicate": "deadline"}]
+        if "SUPERSEDES" in cypher:
+            return [
+                {
+                    "id": 2,
+                    "value": "old-1",
+                    "valid_from": "2026-08-02",
+                    "valid_to": "",
+                    "predicate": "deadline",
+                },
+                {
+                    "id": 3,
+                    "value": "old-2",
+                    "valid_from": "2026-08-01",
+                    "valid_to": "",
+                    "predicate": "deadline",
+                },
+                {
+                    "id": 4,
+                    "value": "old-3",
+                    "valid_from": "2026-07-31",
+                    "valid_to": "",
+                    "predicate": "deadline",
+                },
+            ]
+        return []
+
+
+def test_chain_reads_fail_on_high_fanout_after_limit_plus_one():
+    with pytest.raises(ClaimReadLimitError, match="chain relation limit"):
+        ClaimReader(_ChainLimitDB()).read_chain(
+            1, ClaimScope("product launch", "deadline", limit=2)
+        )

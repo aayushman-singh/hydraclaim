@@ -10,6 +10,7 @@ from hydraclaim.retrieve import (
     build_conflict_answer,
     build_fast_answer,
     build_temporal_answer,
+    fetch_chain,
 )
 
 CLAIM = {
@@ -118,6 +119,11 @@ def test_temporal_fallback_uses_chain_answer():
     result = answer(db, "What was the launch deadline before the cut?")
     assert "current, since 2026-05-18" in result["answer"]
     assert "2026-10-10" in result["answer"]
+    assert len(result["citations"]) == 2
+    assert result["citations"][0]["claim_id"] == "dl-3"
+    assert result["citations"][1]["value"] == "2026-10-10"
+    assert result["citations"][1]["claim_id"] == "dl-2"
+    assert result["citations"][1]["quote"] == "quote for dl-2"
 
 
 def test_conflict_answer_shows_all_sides_and_winner():
@@ -179,6 +185,41 @@ def test_abstain_uncovered_falls_back_without_claims():
     )
 
 
+class _ChainCompatDB:
+    def __init__(self, lookup_rows):
+        self.lookup_rows = lookup_rows
+        self.queries = []
+
+    def query(self, cypher, consistency="causal"):
+        self.queries.append(cypher)
+        if "RETURN e.name AS subject, c.predicate AS predicate" in cypher:
+            return self.lookup_rows
+        if "RETURN c.id AS id, e.name AS subject, c.predicate AS predicate" in cypher:
+            return [{"id": 1, "subject": "product launch", "predicate": "deadline"}]
+        return []
+
+
+def test_fetch_chain_resolves_scope_for_legacy_claim_id_only_form():
+    db = _ChainCompatDB([{"subject": "product launch", "predicate": "deadline"}])
+
+    assert fetch_chain(db, 1) == []
+    assert any("LIMIT 2" in query for query in db.queries)
+
+
+def test_fetch_chain_keeps_explicit_scope_form():
+    db = _ChainCompatDB([])
+
+    assert fetch_chain(db, 1, "product launch", "deadline") == []
+    assert not any(
+        "RETURN e.name AS subject, c.predicate AS predicate" in q for q in db.queries
+    )
+
+
+def test_fetch_chain_fails_when_legacy_scope_lookup_is_unresolved():
+    with pytest.raises(ValueError, match="cannot resolve claim scope"):
+        fetch_chain(_ChainCompatDB([]), 1)
+
+
 class _FakeDB:
     """Serves canned rows for the query shapes answer()/probe() emit."""
 
@@ -222,11 +263,15 @@ class _FakeDB:
                         out.append(
                             {
                                 "id": old_id,
+                                "key": row["key"],
                                 "value": row["value"],
                                 "valid_from": row["valid_from"],
                                 "valid_to": row["valid_to"],
                                 "subject": row["subject"],
                                 "predicate": row["predicate"],
+                                "quote": row["quote"],
+                                "source_kind": row["source_kind"],
+                                "author": row["author"],
                             }
                         )
             return out
@@ -236,6 +281,9 @@ class _FakeDB:
             return [
                 {
                     "id": old_id,
+                    "key": next(
+                        claim["key"] for claim in self._claims if claim["id"] == old_id
+                    ),
                     "value": next(
                         claim["value"]
                         for claim in self._claims
@@ -253,6 +301,21 @@ class _FakeDB:
                     ),
                     "predicate": next(
                         claim["predicate"]
+                        for claim in self._claims
+                        if claim["id"] == old_id
+                    ),
+                    "quote": next(
+                        claim["quote"]
+                        for claim in self._claims
+                        if claim["id"] == old_id
+                    ),
+                    "source_kind": next(
+                        claim["source_kind"]
+                        for claim in self._claims
+                        if claim["id"] == old_id
+                    ),
+                    "author": next(
+                        claim["author"]
                         for claim in self._claims
                         if claim["id"] == old_id
                     ),

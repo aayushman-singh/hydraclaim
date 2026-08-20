@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from hydraclaim.cypher import to_cypher_literal as lit
 from hydraclaim.db import HydraDB
+from hydraclaim.errors import GraphIntegrityError
 from hydraclaim.model import split_aliases
 from hydraclaim.scoring import rank_claims
 
@@ -110,22 +111,29 @@ class AnswerResult:
 
 def _chain_depth(edges: list[tuple[int, int]], ids: set[int]) -> int:
     """Return the longest selected supersession path in edges."""
-    forward: dict[int, list[int]] = {}
+    forward: dict[int, set[int]] = {}
     for new_id, old_id in edges:
         if new_id in ids and old_id in ids:
-            forward.setdefault(new_id, []).append(old_id)
+            forward.setdefault(new_id, set()).add(old_id)
 
-    memo: dict[int, int] = {}
-
-    def depth(node: int) -> int:
-        if node not in memo:
-            memo[node] = max(
-                (1 + depth(child) for child in forward.get(node, [])),
-                default=0,
-            )
-        return memo[node]
-
-    return max((depth(node) for node in forward), default=0)
+    indegree = {node: 0 for node in ids}
+    for children in forward.values():
+        for child in children:
+            indegree[child] = indegree.get(child, 0) + 1
+    pending = [node for node, degree in indegree.items() if degree == 0]
+    depth = {node: 0 for node in indegree}
+    processed = 0
+    while pending:
+        node = pending.pop()
+        processed += 1
+        for child in sorted(forward.get(node, ())):
+            depth[child] = max(depth[child], depth[node] + 1)
+            indegree[child] -= 1
+            if indegree[child] == 0:
+                pending.append(child)
+    if processed != len(indegree):
+        raise GraphIntegrityError("supersession cycle detected in selected claims")
+    return max(depth.values(), default=0)
 
 
 def _claim_dict(claim: ClaimView) -> dict:
@@ -244,22 +252,37 @@ LIMIT {int(scope.limit) + 1}"""
             return_fields = "a.id AS a_id, b.id AS b_id, r.resolved AS resolved"
             relation_match = "-[r:CONTRADICTS]->"
         rows: list[dict] = []
+        selected_ids = ", ".join(str(int(claim_id)) for claim_id in sorted(claim_ids))
         for claim_id in sorted(claim_ids):
             if self._read_claim_scope_membership(claim_id, scope) is None:
                 continue
-            predicate_clause = (
-                f"WHERE a.predicate = {lit(scope.predicate)} "
-                f"AND b.predicate = {lit(scope.predicate)}"
-                if scope.predicate
-                else ""
-            )
-            for row in self._db.query(
+            predicates = [f"b.id IN [{selected_ids}]"]
+            if scope.predicate:
+                predicates.extend(
+                    [
+                        f"a.predicate = {lit(scope.predicate)}",
+                        f"b.predicate = {lit(scope.predicate)}",
+                    ]
+                )
+            predicate_clause = "WHERE " + " AND ".join(predicates)
+            relation_rows = self._db.query(
                 f"""
 MATCH (a:Claim {{id: {int(claim_id)}}}){relation_match}(b:Claim)
 {predicate_clause}
 RETURN {return_fields}
-ORDER BY a.id ASC, b.id ASC"""
-            ):
+ORDER BY a.id ASC, b.id ASC
+LIMIT {int(scope.limit) + 1}"""
+            )
+            if len(relation_rows) > scope.limit:
+                raise ClaimReadLimitError(
+                    "claim relation limit exceeded for "
+                    f"subject={scope.subject!r}, predicate={(scope.predicate or '*')!r}, "
+                    f"limit={scope.limit}; more relations exist",
+                    subject=scope.subject,
+                    predicate=scope.predicate,
+                    limit=scope.limit,
+                )
+            for row in relation_rows:
                 target_key = "old_id" if relation_type == "SUPERSEDES" else "b_id"
                 target_id = int(row.get(target_key, row.get("dst")))
                 if target_id not in claim_ids:
@@ -267,6 +290,15 @@ ORDER BY a.id ASC, b.id ASC"""
                 if self._read_claim_scope_membership(target_id, scope) is None:
                     continue
                 rows.append(row)
+                if len(rows) > scope.limit:
+                    raise ClaimReadLimitError(
+                        "claim relation limit exceeded for "
+                        f"subject={scope.subject!r}, predicate={(scope.predicate or '*')!r}, "
+                        f"limit={scope.limit}; more relations exist",
+                        subject=scope.subject,
+                        predicate=scope.predicate,
+                        limit=scope.limit,
+                    )
         if relation_type == "SUPERSEDES":
             rows = [
                 {
@@ -311,6 +343,13 @@ ORDER BY a.id ASC, b.id ASC"""
                     f"older.predicate = {lit(scope.predicate)}",
                 ]
             )
+        if scope.as_of:
+            predicate_clauses.extend(
+                [
+                    f"older.recorded_at <= {lit(scope.as_of)}",
+                    f"(older.valid_to = '' OR older.valid_to > {lit(scope.as_of)})",
+                ]
+            )
         scoped_rows = []
         pending = [(int(claim_id), 0)]
         seen_ids = {int(claim_id)}
@@ -324,11 +363,25 @@ ORDER BY a.id ASC, b.id ASC"""
                 f"""
 MATCH (current:Claim {{id: {current_id}}})-[:SUPERSEDES]->(older:Claim)
 WHERE {" AND ".join(predicate_clauses)}
+OPTIONAL MATCH (older)-[:ABOUT]->(older_entity:Entity)
+OPTIONAL MATCH (older)-[:SUPPORTED_BY]->(older_ev:Evidence)-[:FROM]->(older_source:Source)
 RETURN older.id AS id, older.value AS value,
-       older.valid_from AS valid_from, older.valid_to AS valid_to,
-       older.predicate AS predicate
-ORDER BY older.valid_from DESC, older.id DESC"""
+       older.key AS key, older.valid_from AS valid_from, older.valid_to AS valid_to,
+       older_entity.name AS subject, older.predicate AS predicate,
+       older_ev.quote AS quote, older_source.kind AS source_kind,
+       older_source.author AS author
+ORDER BY older.valid_from DESC, older.id DESC
+LIMIT {int(scope.limit) + 1}"""
             )
+            if len(rows) > scope.limit:
+                raise ClaimReadLimitError(
+                    "claim chain relation limit exceeded for "
+                    f"subject={scope.subject!r}, predicate={(scope.predicate or '*')!r}, "
+                    f"limit={scope.limit}; more relations exist",
+                    subject=scope.subject,
+                    predicate=scope.predicate,
+                    limit=scope.limit,
+                )
             rows = sorted(
                 rows,
                 key=lambda row: (str(row["valid_from"]), int(row.get("id", 0))),
@@ -337,7 +390,9 @@ ORDER BY older.valid_from DESC, older.id DESC"""
             for row in rows:
                 older_id = int(row["id"])
                 if older_id in seen_ids:
-                    continue
+                    raise GraphIntegrityError(
+                        "supersession cycle detected while reading claim chain"
+                    )
                 seen_ids.add(older_id)
                 if row["predicate"] != start_predicate:
                     continue
@@ -351,6 +406,15 @@ ORDER BY older.valid_from DESC, older.id DESC"""
                         "predicate": older["predicate"],
                     }
                 )
+                if len(scoped_rows) > scope.limit:
+                    raise ClaimReadLimitError(
+                        "claim chain limit exceeded for "
+                        f"subject={scope.subject!r}, predicate={(scope.predicate or '*')!r}, "
+                        f"limit={scope.limit}; more claims exist",
+                        subject=scope.subject,
+                        predicate=scope.predicate,
+                        limit=scope.limit,
+                    )
                 pending.append((older_id, current_depth + 1))
         return tuple(
             sorted(
@@ -363,15 +427,30 @@ ORDER BY older.valid_from DESC, older.id DESC"""
     def _read_claim_scope_membership(
         self, claim_id: int, scope: ClaimScope
     ) -> dict | None:
-        predicate_clause = (
-            f"WHERE c.predicate = {lit(scope.predicate)}" if scope.predicate else ""
-        )
+        clauses = [f"e.name = {lit(scope.subject)}"]
+        if scope.predicate:
+            clauses.append(f"c.predicate = {lit(scope.predicate)}")
+        if scope.as_of:
+            clauses.extend(
+                [
+                    f"c.recorded_at <= {lit(scope.as_of)}",
+                    f"(c.valid_to = '' OR c.valid_to > {lit(scope.as_of)})",
+                ]
+            )
         rows = self._db.query(
             f"""
 MATCH (c:Claim {{id: {int(claim_id)}}})-[:ABOUT]->(e:Entity {{name: {lit(scope.subject)}}})
-{predicate_clause}
-RETURN c.id AS id, e.name AS subject, c.predicate AS predicate"""
+WHERE {" AND ".join(clauses)}
+RETURN c.id AS id, e.name AS subject, c.predicate AS predicate
+LIMIT {int(scope.limit) + 1}"""
         )
+        if len(rows) > scope.limit:
+            raise ClaimReadLimitError(
+                "claim scope relation limit exceeded",
+                subject=scope.subject,
+                predicate=scope.predicate,
+                limit=scope.limit,
+            )
         for row in rows:
             if int(row["id"]) != int(claim_id):
                 continue
@@ -387,6 +466,7 @@ RETURN c.id AS id, e.name AS subject, c.predicate AS predicate"""
             ClaimScope(
                 subject=scope.subject,
                 predicate=scope.predicate,
+                as_of=scope.as_of,
                 limit=scope.limit,
             )
         )
@@ -459,13 +539,18 @@ RETURN c.id AS id, e.name AS subject, c.predicate AS predicate"""
         scope = ClaimScope(
             subject=classification.subject,
             predicate=classification.predicate,
+            as_of=classification.as_of,
         )
         probe_result = self.probe(scope)
         route = force_route or decide_route(classification.question_type, probe_result)
         if route == ROUTE_ABSTAIN:
             if classification.predicate is None and probe_result.coverage:
                 active_any = self.read_claims(
-                    ClaimScope(subject=classification.subject, active_only=True)
+                    ClaimScope(
+                        subject=classification.subject,
+                        active_only=True,
+                        as_of=classification.as_of,
+                    )
                 )
                 available = sorted({claim.predicate for claim in active_any})
                 text = abstain_uncovered_message(classification.subject, available)
@@ -557,7 +642,9 @@ RETURN c.id AS id, e.name AS subject, c.predicate AS predicate"""
             return AnswerResult(
                 route,
                 build_chain_answer(_claim_dict(active[0]), list(chain)),
-                (_citation(active[0]),),
+                tuple(
+                    [_citation(active[0])] + [_citation(ancestor) for ancestor in chain]
+                ),
                 classification,
                 probe_result,
             )
