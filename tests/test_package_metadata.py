@@ -201,9 +201,11 @@ def test_release_archives_exclude_local_and_generated_content() -> None:
 
     with zipfile.ZipFile(wheel_path) as archive:
         wheel_names = archive.namelist()
-        metadata_name = next(
+        metadata_names = [
             name for name in wheel_names if name.endswith(".dist-info/METADATA")
-        )
+        ]
+        assert len(metadata_names) == 1
+        metadata_name = metadata_names[0]
         wheel_metadata = archive.read(metadata_name).decode("utf-8")
     with tarfile.open(sdist_path) as archive:
         sdist_names = archive.getnames()
