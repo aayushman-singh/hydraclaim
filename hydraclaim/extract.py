@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import sys
 from datetime import date, datetime
@@ -174,12 +175,13 @@ SESSION {session["session_id"]} MESSAGES:
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
 
-def _score(value: object, default: float) -> tuple[float, bool]:
-    try:
-        f = float(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return default, False
-    return min(max(f, 0.0), 1.0), True
+def _score(value: object, field: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"invalid {field}: {value!r}")
+    score = float(value)
+    if not math.isfinite(score) or not 0.0 <= score <= 1.0:
+        raise ValueError(f"invalid {field}: {value!r}; expected a number from 0 to 1")
+    return score
 
 
 def parse_claims(
@@ -242,16 +244,11 @@ def parse_claims(
             warnings.append(f"{where}: missing subject, dropped")
             continue
 
-        explicitness, ok = _score(raw.get("explicitness"), 1.0)
-        if not ok:
-            warnings.append(
-                f"{where}: explicitness {raw.get('explicitness')!r} -> default 1.0"
-            )
-        confidence, ok = _score(raw.get("confidence"), 0.5)
-        if not ok:
-            warnings.append(
-                f"{where}: confidence {raw.get('confidence')!r} -> default 0.5"
-            )
+        try:
+            explicitness = _score(raw.get("explicitness"), "explicitness")
+            confidence = _score(raw.get("confidence"), "confidence")
+        except ValueError as exc:
+            raise ValueError(f"{where}: {exc}") from exc
 
         value = _normalize_value(raw.get("value", ""), msg, raw["predicate"])
         supersedes, warn = _validate_supersedes(raw.get("supersedes"), active_ids)

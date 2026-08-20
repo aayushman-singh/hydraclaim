@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from copy import deepcopy
+
 import pytest
 
 from hydraclaim import ingest, reconcile
@@ -199,4 +201,44 @@ def test_apply_plan_validates_before_first_query():
     with pytest.raises(ValueError, match="quote"):
         GraphWriter(db).apply_plan(invalid, "scenario")
 
+    assert db.queries == []
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("valid_from", "2026-02-30"),
+        ("valid_to", "not-a-date"),
+        ("subject", ""),
+        ("value", "  "),
+        ("quote", ""),
+        ("author", ""),
+        ("status", "unknown"),
+        ("confidence", 1.1),
+        ("explicitness", -0.1),
+        ("session_id", {"not": "scalar"}),
+        ("unsupported", {"nested": "property"}),
+    ],
+)
+def test_apply_plan_rejects_invalid_claim_properties_before_any_write(field, value):
+    db = RecordingDB()
+    plan = deepcopy(_plan())
+    plan["create"][0][field] = value
+
+    with pytest.raises(ValueError, match=field):
+        GraphWriter(db).apply_plan(plan, "scenario")
+
+    assert db.writes == []
+    assert db.queries == []
+
+
+def test_ingest_rejects_invalid_claim_properties_before_any_write():
+    db = RecordingDB()
+    scenario = deepcopy(_scenario())
+    scenario["ground_truth"]["claims"][0]["type"] = {"unsupported": True}
+
+    with pytest.raises(ValueError, match="type"):
+        GraphWriter(db).ingest_document(scenario)
+
+    assert db.writes == []
     assert db.queries == []

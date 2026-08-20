@@ -142,14 +142,13 @@ def test_drops_unknown_msg_id():
     assert drafts == [] and "msg_id" in warnings[0]
 
 
-def test_coerces_bad_scores_to_defaults():
-    drafts, warnings = parse_claims(
-        _single({"confidence": "high", "explicitness": None}), SESSION, ACTIVE
-    )
-    assert len(drafts) == 1
-    assert drafts[0]["confidence"] == 0.5
-    assert drafts[0]["explicitness"] == 1.0
-    assert len(warnings) == 2
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("confidence", "high"), ("explicitness", None), ("confidence", 1.1)],
+)
+def test_rejects_invalid_scores_without_defaults(field, value):
+    with pytest.raises(ValueError, match=field):
+        parse_claims(_single({field: value}), SESSION, ACTIVE)
 
 
 def test_empty_claims_list():

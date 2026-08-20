@@ -6,7 +6,9 @@ Reconciliation remains responsible for deciding which writes are needed.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import math
+import re
+from datetime import date, datetime, timezone
 from typing import Any
 
 from hydraclaim.claims import PREDICATES, SOURCE_KINDS, validate_scenario
@@ -19,6 +21,33 @@ from hydraclaim.model import (
     graph_id,
     source_props,
 )
+
+
+_VALID_STATUSES = frozenset({"active", "superseded", "disputed"})
+_DATE_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}\Z")
+_CLAIM_FIELDS = frozenset(
+    {
+        "id",
+        "key",
+        "subject",
+        "predicate",
+        "value",
+        "valid_from",
+        "valid_to",
+        "status",
+        "confidence",
+        "quote",
+        "explicitness",
+        "source_kind",
+        "author",
+        "session_id",
+        "msg_id",
+        "type",
+        "supersedes",
+        "contradicts_with",
+    }
+)
+_ENTITY_FIELDS = frozenset({"name", "type", "aliases"})
 
 
 def _props(props: dict) -> str:
@@ -94,16 +123,40 @@ def _require_dict(value: object, name: str, errors: list[str]) -> dict:
 
 
 def _validate_scalar(value: object, name: str, errors: list[str]) -> None:
-    if not isinstance(value, (str, int, float, bool)):
+    if not isinstance(value, (str, int, float, bool)) or (
+        isinstance(value, float) and not math.isfinite(value)
+    ):
         errors.append(f"{name} must be a scalar")
+
+
+def _validate_non_empty_string(value: object, name: str, errors: list[str]) -> None:
+    if not isinstance(value, str):
+        errors.append(f"{name} must be a string")
+    elif not value.strip():
+        errors.append(f"{name} must be a non-empty string")
+
+
+def _validate_date(
+    value: object, name: str, errors: list[str], *, allow_empty: bool = False
+) -> None:
+    if allow_empty and value == "":
+        return
+    if not isinstance(value, str) or not _DATE_PATTERN.fullmatch(value):
+        errors.append(f"{name} must use YYYY-MM-DD syntax")
+        return
+    try:
+        date.fromisoformat(value)
+    except ValueError:
+        errors.append(f"{name} must be a valid calendar date")
 
 
 def _validate_entity(entity: object, name: str, errors: list[str]) -> None:
     value = _require_dict(entity, name, errors)
-    if not isinstance(value.get("name"), str) or not value.get("name"):
-        errors.append(f"{name}.name must be a non-empty string")
-    if "type" in value and not isinstance(value["type"], str):
-        errors.append(f"{name}.type must be a string")
+    for field in sorted(set(value) - _ENTITY_FIELDS):
+        errors.append(f"{name}.{field} is an unsupported property")
+    _validate_non_empty_string(value.get("name"), f"{name}.name", errors)
+    if "type" in value:
+        _validate_non_empty_string(value["type"], f"{name}.type", errors)
     aliases = value.get("aliases", [])
     if not isinstance(aliases, list) or any(
         not isinstance(alias, str) for alias in aliases
@@ -113,6 +166,8 @@ def _validate_entity(entity: object, name: str, errors: list[str]) -> None:
 
 def _validate_claim(claim: object, name: str, errors: list[str]) -> None:
     value = _require_dict(claim, name, errors)
+    for field in sorted(set(value) - _CLAIM_FIELDS):
+        errors.append(f"{name}.{field} is an unsupported property")
     required = {
         "subject",
         "predicate",
@@ -121,6 +176,8 @@ def _validate_claim(claim: object, name: str, errors: list[str]) -> None:
         "quote",
         "author",
         "source_kind",
+        "confidence",
+        "explicitness",
     }
     missing = sorted(required - value.keys())
     if missing:
@@ -129,24 +186,34 @@ def _validate_claim(claim: object, name: str, errors: list[str]) -> None:
         errors.append(f"{name} has unknown predicate: {value.get('predicate')!r}")
     if value.get("source_kind") not in SOURCE_KINDS:
         errors.append(f"{name} has unknown source_kind: {value.get('source_kind')!r}")
-    for field in ("subject", "value", "valid_from", "quote", "author"):
-        if field in value and not isinstance(value[field], str):
-            errors.append(f"{name}.{field} must be a string")
+    for field in ("subject", "value", "quote", "author"):
+        if field in value:
+            _validate_non_empty_string(value[field], f"{name}.{field}", errors)
+    if "valid_from" in value:
+        _validate_date(value["valid_from"], f"{name}.valid_from", errors)
     if "type" in value:
-        _validate_scalar(value["type"], f"{name}.type", errors)
+        _validate_non_empty_string(value["type"], f"{name}.type", errors)
     if "status" in value and not isinstance(value["status"], str):
         errors.append(f"{name}.status must be a string")
+    elif "status" in value and value["status"] not in _VALID_STATUSES:
+        errors.append(f"{name}.status is invalid: {value['status']!r}")
     if "valid_to" in value and value["valid_to"] is not None:
-        if not isinstance(value["valid_to"], str):
-            errors.append(f"{name}.valid_to must be a string or null")
+        _validate_date(value["valid_to"], f"{name}.valid_to", errors, allow_empty=True)
     for field in ("session_id", "msg_id"):
         if field in value and not isinstance(value[field], str):
             errors.append(f"{name}.{field} must be a string")
+    if "supersedes" in value and value["supersedes"] not in (None, ""):
+        if not isinstance(value["supersedes"], str):
+            errors.append(f"{name}.supersedes must be a claim id string or null")
+    if "contradicts_with" in value:
+        refs = value["contradicts_with"]
+        if not isinstance(refs, list) or any(not isinstance(ref, str) for ref in refs):
+            errors.append(f"{name}.contradicts_with must be a list of claim ids")
     for field in ("explicitness", "confidence"):
-        field_value = value.get(field, 1.0)
+        field_value = value.get(field)
         if not isinstance(field_value, (int, float)) or isinstance(field_value, bool):
             errors.append(f"{name}.{field} must be numeric")
-        elif not 0.0 <= field_value <= 1.0:
+        elif not math.isfinite(float(field_value)) or not 0.0 <= field_value <= 1.0:
             errors.append(f"{name}.{field} out of range: {field_value}")
 
 
@@ -256,6 +323,8 @@ def _validate_plan(plan: object, scenario_id: object, entities: object) -> list[
                     errors.append(
                         f"plan.supersede[{index}].{field} must be a non-empty string"
                     )
+            if isinstance(edge_value.get("at"), str):
+                _validate_date(edge_value["at"], f"plan.supersede[{index}].at", errors)
 
     contradict = plan_value.get("contradict", [])
     if isinstance(contradict, list):
