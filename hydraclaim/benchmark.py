@@ -11,18 +11,17 @@ from __future__ import annotations
 import argparse
 import glob
 import json
-import re
 import string
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from hydraclaim.claim_read import ClaimReader, ClaimScope
 from hydraclaim.db import HydraDB
-from hydraclaim.retrieve import answer, fetch_entities
+from hydraclaim.retrieve import fetch_entities
 from hydraclaim.router import ROUTE_DEEP, ROUTE_FAST, classify
 
-REFUSAL_PHRASE = "don't have any recorded information"
 ROUTE_NAIVE_RAG = "NAIVE_RAG"
 
 
@@ -41,24 +40,33 @@ def naive_answer(db: CountingDB, question: str, roster: list[dict]) -> dict:
     if cls.subject is None:
         return {
             "route": ROUTE_NAIVE_RAG,
-            "answer": (f"I don't have any recorded information about '{question}'. "
-                       f"No subject matched the entity roster."),
+            "answer": (
+                f"I don't have any recorded information about '{question}'. "
+                f"No subject matched the entity roster."
+            ),
             "citations": [],
         }
 
-    from hydraclaim.cypher import to_cypher_literal as lit
-    rows = db.query(
-        f"MATCH (c:Claim)-[:ABOUT]->(e:Entity {{name: {lit(cls.subject)}}}) "
-        "RETURN c.predicate AS predicate, c.value AS value, c.status AS status, "
-        "       c.valid_from AS valid_from"
-    )
+    rows = [
+        {
+            "predicate": claim.predicate,
+            "value": claim.value,
+            "status": claim.status,
+            "valid_from": claim.valid_from,
+        }
+        for claim in ClaimReader(db).read_claims(
+            ClaimScope(subject=cls.subject, active_only=True)
+        )
+    ]
     active = [r for r in rows if r.get("status") == "active"]
     if not active:
         return {
             "route": ROUTE_NAIVE_RAG,
-            "answer": (f"I don't have any recorded information about the "
-                       f"{cls.predicate or 'facts'} of '{cls.subject}'. "
-                       f"No active claims found."),
+            "answer": (
+                f"I don't have any recorded information about the "
+                f"{cls.predicate or 'facts'} of '{cls.subject}'. "
+                f"No active claims found."
+            ),
             "citations": [],
         }
 
@@ -106,7 +114,9 @@ class CountingDB:
         self._count += 1
         return self._db.query(cypher, consistency=consistency)
 
-    def query_one(self, cypher: str, consistency: str = "causal") -> dict[str, Any] | None:
+    def query_one(
+        self, cypher: str, consistency: str = "causal"
+    ) -> dict[str, Any] | None:
         self._count += 1
         return self._db.query_one(cypher, consistency=consistency)
 
@@ -129,7 +139,9 @@ def router_only_route(question_type: str) -> str:
     return ROUTE_FAST if question_type == "lookup" else ROUTE_DEEP
 
 
-def correct(result: dict, gold_answer: str, qtype: str, rubric: list[str] | None = None) -> bool:
+def correct(
+    result: dict, gold_answer: str, qtype: str, rubric: list[str] | None = None
+) -> bool:
     """Return True when the produced answer matches the gold answer.
 
     - Abstention questions are correct only when the system abstained.
@@ -192,15 +204,16 @@ def run_arm(
             db.reset()
             start = time.perf_counter()
 
+            reader = ClaimReader(db)
             if arm == "router+probe":
-                result = answer(db, question)
+                result = reader.answer(question).as_dict()
             elif arm == "router-only":
                 cls = classify(question, roster)
-                result = answer(
-                    db, question, force_route=router_only_route(cls.question_type)
-                )
+                result = reader.answer(
+                    question, force_route=router_only_route(cls.question_type)
+                ).as_dict()
             elif arm == "always-deep":
-                result = answer(db, question, force_route=ROUTE_DEEP)
+                result = reader.answer(question, force_route=ROUTE_DEEP).as_dict()
             elif arm == "naive-rag":
                 result = naive_answer(db, question, roster)
             else:
@@ -211,9 +224,6 @@ def run_arm(
             questions += 1
 
             is_abstain = result["route"] == "ABSTAIN"
-            if arm == "router-only" and qtype == "abstention":
-                if REFUSAL_PHRASE in result["answer"].lower():
-                    is_abstain = True
 
             if qtype == "abstention":
                 if is_abstain:
@@ -245,9 +255,11 @@ def run_arm(
 def summarize(arm_results: list[dict]) -> str:
     """Render arm results as a markdown table."""
     qtypes = sorted({qt for r in arm_results for qt in r["per_qtype"]})
-    headers = ["arm", "accuracy"] + qtypes + [
-        "abstention P", "abstention R", "queries/q", "p50 ms", "p95 ms"
-    ]
+    headers = (
+        ["arm", "accuracy"]
+        + qtypes
+        + ["abstention P", "abstention R", "queries/q", "p50 ms", "p95 ms"]
+    )
 
     def _fmt(value: float) -> str:
         return f"{value:.3f}"
@@ -272,19 +284,28 @@ def summarize(arm_results: list[dict]) -> str:
         for qt in qtypes:
             m = result["per_qtype"].get(qt, {"n": 0, "correct": 0})
             row.append(_fmt(m["correct"] / m["n"]) if m["n"] else "n/a")
-        row.extend([
-            _fmt(p), _fmt(r), f"{mean_queries:.1f}",
-            f"{p50:.1f}", f"{p95:.1f}",
-        ])
+        row.extend(
+            [
+                _fmt(p),
+                _fmt(r),
+                f"{mean_queries:.1f}",
+                f"{p50:.1f}",
+                f"{p95:.1f}",
+            ]
+        )
         rows.append(row)
 
-    widths = [max(len(rows[i][c]) for i in range(len(rows))) for c in range(len(headers))]
+    widths = [
+        max(len(rows[i][c]) for i in range(len(rows))) for c in range(len(headers))
+    ]
     widths = [max(len(headers[i]), widths[i]) for i in range(len(headers))]
 
     def _line(cells: list[str]) -> str:
-        return "| " + " | ".join(
-            cell.ljust(widths[i]) for i, cell in enumerate(cells)
-        ) + " |"
+        return (
+            "| "
+            + " | ".join(cell.ljust(widths[i]) for i, cell in enumerate(cells))
+            + " |"
+        )
 
     lines = [_line(headers), "|" + "|".join("-" * (w + 2) for w in widths) + "|"]
     lines.extend(_line(row) for row in rows)

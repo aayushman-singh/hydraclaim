@@ -2,11 +2,6 @@
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
-import pytest
-
 from hydraclaim.benchmark import (
     CountingDB,
     correct,
@@ -170,7 +165,7 @@ def test_run_arm_uses_forced_route_for_always_deep():
     assert result["per_qtype"]["lookup"]["n"] == 1
 
 
-def test_run_arm_router_only_treats_refusal_as_abstain():
+def test_run_arm_router_only_uses_structured_route_for_abstain():
     class _RefusalDB:
         def __init__(self) -> None:
             self._count = 0

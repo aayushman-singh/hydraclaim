@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from hydraclaim import retrieve
+from hydraclaim.claim_read import ClaimReader, ClaimScope
 from hydraclaim.ratelimit import limiter
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "sessions"
@@ -167,29 +168,36 @@ def handle_suggestions(llm_fn) -> dict[str, Any]:
 
 def handle_graph(db) -> dict[str, Any]:
     """Compact graph for visualization: entities + claims + relation edges."""
-    entities = db.query(
-        "MATCH (e:Entity) RETURN e.id AS id, e.name AS name, e.type AS type"
-    )
-    claims = db.query("""
-MATCH (c:Claim)-[:ABOUT]->(e:Entity)
-RETURN c.id AS id, c.key AS key, e.name AS subject, c.predicate AS predicate,
-       c.value AS value, c.status AS status, c.valid_from AS valid_from,
-       c.valid_to AS valid_to""")
+    reader = ClaimReader(db)
+    entities = list(reader.read_entities())
+    claims = []
     edges: list[dict[str, Any]] = []
-    for row in db.query(
-        "MATCH (a:Claim)-[:SUPERSEDES]->(b:Claim) RETURN a.id AS src, b.id AS dst"
-    ):
-        edges.append({"from": row["src"], "to": row["dst"], "type": "SUPERSEDES"})
-    for row in db.query(
-        "MATCH (a:Claim)-[:CONTRADICTS]->(b:Claim) RETURN a.id AS src, b.id AS dst"
-    ):
-        edges.append({"from": row["src"], "to": row["dst"], "type": "CONTRADICTS"})
+    for entity in entities:
+        scope = ClaimScope(subject=entity["name"])
+        selected = reader.read_claims(scope)
+        claims.extend(selected)
+        claim_ids = {claim.id for claim in selected}
+        for relation_type in ("SUPERSEDES", "CONTRADICTS"):
+            for row in reader.read_relations(scope, claim_ids, relation_type):
+                if relation_type == "SUPERSEDES":
+                    source = row.get("new_id", row.get("src"))
+                    target = row.get("old_id", row.get("dst"))
+                else:
+                    source = row.get("a_id", row.get("src"))
+                    target = row.get("b_id", row.get("dst"))
+                edges.append(
+                    {
+                        "from": source,
+                        "to": target,
+                        "type": relation_type,
+                    }
+                )
     entity_id_by_name = {e["name"]: e["id"] for e in entities}
     for claim in claims:
         edges.append(
             {
-                "from": claim["id"],
-                "to": entity_id_by_name[claim["subject"]],
+                "from": claim.id,
+                "to": entity_id_by_name[claim.subject],
                 "type": "ABOUT",
             }
         )
@@ -203,12 +211,12 @@ RETURN c.id AS id, c.key AS key, e.name AS subject, c.predicate AS predicate,
         for e in entities
     ] + [
         {
-            "id": c["id"],
-            "label": f"{c['predicate']}: {c['value']}",
+            "id": c.id,
+            "label": f"{c.predicate}: {c.value}",
             "kind": "claim",
-            "key": c["key"],
-            "subject": c["subject"],
-            "status": c["status"],
+            "key": c.key,
+            "subject": c.subject,
+            "status": c.status,
         }
         for c in claims
     ]
