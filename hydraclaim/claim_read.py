@@ -351,12 +351,17 @@ LIMIT {int(scope.limit) + 1}"""
                 ]
             )
         scoped_rows = []
-        pending = [(int(claim_id), 0)]
+        pending = [(int(claim_id), 0, frozenset({int(claim_id)}))]
         seen_ids = {int(claim_id)}
+        scheduled_ids = {int(claim_id)}
+        expanded_ids: set[int] = set()
         cursor = 0
         while cursor < len(pending):
-            current_id, current_depth = pending[cursor]
+            current_id, current_depth, path = pending[cursor]
             cursor += 1
+            if current_id in expanded_ids:
+                continue
+            expanded_ids.add(current_id)
             if current_depth >= MAX_CHAIN_DEPTH:
                 continue
             rows = self._db.query(
@@ -389,33 +394,38 @@ LIMIT {int(scope.limit) + 1}"""
             )
             for row in rows:
                 older_id = int(row["id"])
-                if older_id in seen_ids:
+                if older_id in path:
                     raise GraphIntegrityError(
                         "supersession cycle detected while reading claim chain"
                     )
-                seen_ids.add(older_id)
                 if row["predicate"] != start_predicate:
                     continue
                 older = self._read_claim_scope_membership(older_id, scope)
                 if older is None or older["predicate"] != start_predicate:
                     continue
-                scoped_rows.append(
-                    {
-                        **row,
-                        "subject": older["subject"],
-                        "predicate": older["predicate"],
-                    }
-                )
-                if len(scoped_rows) > scope.limit:
-                    raise ClaimReadLimitError(
-                        "claim chain limit exceeded for "
-                        f"subject={scope.subject!r}, predicate={(scope.predicate or '*')!r}, "
-                        f"limit={scope.limit}; more claims exist",
-                        subject=scope.subject,
-                        predicate=scope.predicate,
-                        limit=scope.limit,
+                if older_id not in seen_ids:
+                    scoped_rows.append(
+                        {
+                            **row,
+                            "subject": older["subject"],
+                            "predicate": older["predicate"],
+                        }
                     )
-                pending.append((older_id, current_depth + 1))
+                    seen_ids.add(older_id)
+                    if len(scoped_rows) > scope.limit:
+                        raise ClaimReadLimitError(
+                            "claim chain limit exceeded for "
+                            f"subject={scope.subject!r}, predicate={(scope.predicate or '*')!r}, "
+                            f"limit={scope.limit}; more claims exist",
+                            subject=scope.subject,
+                            predicate=scope.predicate,
+                            limit=scope.limit,
+                        )
+                if older_id not in scheduled_ids:
+                    pending.append(
+                        (older_id, current_depth + 1, path | {older_id})
+                    )
+                    scheduled_ids.add(older_id)
         return tuple(
             sorted(
                 scoped_rows,

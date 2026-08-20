@@ -315,6 +315,45 @@ class _CycleChainDB:
         ]
 
 
+class _BranchingChainDB:
+    def __init__(self) -> None:
+        self.queries: list[str] = []
+        self.claims = {
+            10: ("head", "2026-08-04"),
+            11: ("branch-a", "2026-08-03"),
+            12: ("branch-b", "2026-08-02"),
+            13: ("shared-ancestor", "2026-08-01"),
+        }
+        self.edges = {10: (11, 12), 11: (13,), 12: (13,)}
+
+    def query(self, cypher: str, consistency: str = "causal") -> list[dict]:
+        self.queries.append(cypher)
+        if "RETURN c.id AS id, e.name AS subject, c.predicate AS predicate" in cypher:
+            claim_id = int(cypher.split("{id: ", 1)[1].split("}", 1)[0])
+            if claim_id in self.claims:
+                return [
+                    {
+                        "id": claim_id,
+                        "subject": "product launch",
+                        "predicate": "deadline",
+                    }
+                ]
+            return []
+        if "-[:SUPERSEDES]->" in cypher:
+            claim_id = int(cypher.split("{id: ", 1)[1].split("}", 1)[0])
+            return [
+                {
+                    "id": older_id,
+                    "value": self.claims[older_id][0],
+                    "valid_from": self.claims[older_id][1],
+                    "valid_to": "",
+                    "predicate": "deadline",
+                }
+                for older_id in self.edges.get(claim_id, ())
+            ]
+        return []
+
+
 class _AsOfDB:
     def __init__(self) -> None:
         self.queries: list[str] = []
@@ -604,6 +643,14 @@ def test_chain_is_cycle_safe():
     db = _CycleChainDB()
     with pytest.raises(GraphIntegrityError, match="supersession cycle"):
         ClaimReader(db).read_chain(10, ClaimScope("product launch", "deadline"))
+
+
+def test_chain_accepts_shared_ancestor_in_branching_dag():
+    db = _BranchingChainDB()
+
+    chain = ClaimReader(db).read_chain(10, ClaimScope("product launch", "deadline"))
+
+    assert [row["id"] for row in chain] == [11, 12, 13]
 
 
 def test_chain_reads_raise_on_high_fanout_one_hop():
