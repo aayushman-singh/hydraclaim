@@ -242,3 +242,15 @@ def test_ingest_rejects_invalid_claim_properties_before_any_write():
 
     assert db.writes == []
     assert db.queries == []
+
+
+def test_apply_plan_rejects_invalid_deadline_value_before_any_write():
+    db = RecordingDB()
+    plan = deepcopy(_plan())
+    plan["create"][0].update(predicate="deadline", value="not-a-date")
+
+    with pytest.raises(ValueError, match="value"):
+        GraphWriter(db).apply_plan(plan, "scenario")
+
+    assert db.writes == []
+    assert db.queries == []

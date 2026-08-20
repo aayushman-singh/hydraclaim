@@ -191,6 +191,8 @@ def _validate_claim(claim: object, name: str, errors: list[str]) -> None:
             _validate_non_empty_string(value[field], f"{name}.{field}", errors)
     if "valid_from" in value:
         _validate_date(value["valid_from"], f"{name}.valid_from", errors)
+    if value.get("predicate") == "deadline" and isinstance(value.get("value"), str):
+        _validate_date(value["value"], f"{name}.value", errors)
     if "type" in value:
         _validate_non_empty_string(value["type"], f"{name}.type", errors)
     if "status" in value and not isinstance(value["status"], str):
