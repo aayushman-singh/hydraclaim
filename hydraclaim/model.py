@@ -93,3 +93,20 @@ def entity_props(
 def source_props(source_kind: str, author: str) -> dict:
     key = source_key(source_kind, author)
     return {"id": graph_id(key), "key": key, "kind": source_kind, "author": author}
+
+
+def source_event_props(
+    event: dict, key: str, captured_at: str, content_hash: str
+) -> dict:
+    """Return scalar properties for one accepted source event."""
+    return {
+        "id": graph_id(key),
+        "key": key,
+        "source_kind": event["source_kind"],
+        "author": event["author"],
+        "occurred_at": event["occurred_at"],
+        "captured_at": captured_at,
+        "content": event["content"],
+        "content_hash": content_hash,
+        "status": "CAPTURED",
+    }

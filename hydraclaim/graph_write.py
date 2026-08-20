@@ -23,6 +23,7 @@ from hydraclaim.model import (
     graph_id,
     source_props,
 )
+from hydraclaim.source_events import SourceEventStore
 
 
 _VALID_STATUSES = frozenset({"active", "superseded", "disputed"})
@@ -665,10 +666,35 @@ class GraphWriter:
         for claim in claims:
             claim_id = f"{scenario_id}:{claim['key']}"
             subject = claim["subject"]
+            source_event = {
+                "source_kind": claim["source_kind"],
+                "author": claim["author"],
+                "occurred_at": claim["valid_from"],
+                "content": claim["quote"],
+            }
+            if claim.get("msg_id"):
+                source_event["source_id"] = claim["msg_id"]
+            capture = SourceEventStore(self._db).capture(
+                source_event, ingestion_kind="ORACLE"
+            )
             endpoint = entity_endpoint.get(subject) or _props(
                 entity_props(scenario_id, subject)
             )
             created = _write_claim(self._db, claim_id, claim, endpoint, recorded_at)
+            evidence_id = evidence_props(claim, claim_id)["id"]
+            source_event_id = graph_id(capture["event_key"])
+            if not _edge_exists(
+                self._db,
+                "Evidence",
+                evidence_id,
+                "QUOTED_FROM",
+                "SourceEvent",
+                source_event_id,
+            ):
+                self._db.query(
+                    f"CREATE (evidence:Evidence {{id: {evidence_id}}})"
+                    f"-[:QUOTED_FROM]->(event:SourceEvent {{id: {source_event_id}}})"
+                )
             if not created:
                 stats["skipped_existing"] += 1
             entity_endpoint[subject] = (
@@ -704,6 +730,9 @@ class GraphWriter:
         plan: dict,
         scenario_id: str,
         entities: list[dict] | None = None,
+        *,
+        extraction_key: str | None = None,
+        source_event_keys: dict[str, str] | None = None,
     ) -> dict:
         errors = _validate_plan(plan, scenario_id, entities)
         if errors:
@@ -757,6 +786,21 @@ class GraphWriter:
                 entity_endpoint[subject] = endpoint
             if _write_claim(self._db, claim_id, draft, endpoint, recorded_at):
                 stats["created"] += 1
+            if extraction_key:
+                self._db.query(
+                    f"CREATE (claim:Claim {{id: {graph_id(claim_id)}}})"
+                    f"-[:PRODUCED_BY]->(extraction:Extraction "
+                    f"{{id: {graph_id(extraction_key)}}})"
+                )
+            source_event_key = (source_event_keys or {}).get(
+                str(draft.get("msg_id", ""))
+            )
+            if source_event_key:
+                self._db.query(
+                    f"CREATE (evidence:Evidence {{id: {evidence_props(draft, claim_id)['id']}}})"
+                    f"-[:QUOTED_FROM]->(event:SourceEvent "
+                    f"{{id: {graph_id(source_event_key)}}})"
+                )
             entity_endpoint[subject] = (
                 f"{{id: {graph_id(entity_key(scenario_id, subject))}}}"
             )

@@ -182,6 +182,21 @@ def test_apply_plan_does_not_duplicate_existing_claim_writes():
     assert len([q for q in db.writes if "[:ABOUT]" in q]) == 1
 
 
+def test_apply_plan_links_claim_and_evidence_to_processing_provenance():
+    db = RecordingDB()
+
+    GraphWriter(db).apply_plan(
+        _plan(),
+        "scenario",
+        extraction_key="extraction-1",
+        source_event_keys={"s1-m1": "source-event-1"},
+    )
+
+    writes = "\n".join(db.writes)
+    assert "PRODUCED_BY" in writes
+    assert "QUOTED_FROM" in writes
+
+
 def test_apply_plan_rejects_unknown_relation_endpoint_before_writes():
     db = RecordingDB()
     plan = _plan()
@@ -244,6 +259,17 @@ def test_ingest_validates_before_first_query():
         GraphWriter(db).ingest_document(invalid)
 
     assert db.queries == []
+
+
+def test_oracle_ingest_creates_processed_source_event_without_extraction():
+    db = RecordingDB()
+    GraphWriter(db).ingest_document(_scenario())
+    writes = "\n".join(db.writes)
+    assert "SourceEvent" in writes
+    assert "ingestion_kind: 'ORACLE'" in writes
+    assert "PROCESSED" in writes
+    assert "QUOTED_FROM" in writes
+    assert "Extraction" not in writes
 
 
 def test_apply_plan_validates_before_first_query():

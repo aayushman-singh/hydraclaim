@@ -33,11 +33,21 @@ _SCHEMA_REFERENCE = """// HydraClaim graph model on HydraDB (documentation + can
 // (:Evidence {id, quote, ts, session_id, msg_id,
 //             extraction_confidence, explicitness})
 // (:Source   {id, kind, author, channel})                    // kind: slack | linear | meeting
+// (:SourceEvent {id, key, source_kind, author, occurred_at, captured_at,
+//                content, content_hash, status, ingestion_kind})
+// (:Extraction {id, key, provider, model, prompt_version,
+//               started_at, finished_at, status})
+// (:FailureRecord {id, key, step, error_type, message, traceback, failed_at})
 //
 // Edges
 // (Claim)-[:ABOUT]->(Entity)
 // (Claim)-[:SUPPORTED_BY]->(Evidence)
 // (Evidence)-[:FROM]->(Source)
+// (SourceEvent)-[:FROM]->(Source)
+// (Extraction)-[:READ_FROM]->(SourceEvent)
+// (Claim)-[:PRODUCED_BY]->(Extraction)
+// (Evidence)-[:QUOTED_FROM]->(SourceEvent)
+// (Extraction)-[:FAILED_WITH]->(FailureRecord)
 // (Claim)-[:SUPERSEDES {at}]->(Claim)                        // explicit overwrite, new -> old
 // (Claim)-[:CONTRADICTS {resolved, detected_at}]->(Claim)    // unresolved conflict
 //

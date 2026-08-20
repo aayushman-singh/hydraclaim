@@ -19,6 +19,10 @@ COMMAND_NAMES = (
     "pipeline",
     "benchmark",
     "longmemeval",
+    "record",
+    "process",
+    "status",
+    "events",
 )
 
 
@@ -82,7 +86,7 @@ COMMAND_SETTINGS = {
 
 def test_dispatcher_has_exactly_the_public_commands() -> None:
     assert tuple(COMMANDS) == COMMAND_NAMES
-    assert len(COMMANDS) == 10
+    assert len(COMMANDS) == len(COMMAND_NAMES)
 
 
 def test_root_version(capsys: pytest.CaptureFixture[str]) -> None:

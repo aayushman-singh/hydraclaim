@@ -126,6 +126,24 @@ hydraclaim evaluate data/sessions/deadline_drift.json drafts.json
 hydraclaim pipeline data/sessions/deadline_drift.json
 ```
 
+### Capture and inspect source events
+
+HydraClaim saves an accepted source event before extraction. A failed extraction
+keeps the exact source text and records the stopped step. HydraClaim does not
+retry or select another processing path.
+
+```bash
+hydraclaim record source-event.json
+hydraclaim process source-event:slack:message-42
+hydraclaim status
+hydraclaim events list --limit 20
+hydraclaim events show source-event:slack:message-42
+```
+
+`record` only captures the event. `process` starts one explicit extraction
+attempt. Use `process --reprocess` to start a new attempt for an event that was
+already processed. Earlier attempts remain available through `events show`.
+
 ### Run the tests
 
 ```bash

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -22,6 +23,7 @@ from hydraclaim.extract import _parse_timestamp, extract_session
 from hydraclaim.graph_write import GraphWriter
 from hydraclaim.reconcile import plan_writes
 from hydraclaim.claims import SOURCE_KINDS
+from hydraclaim.source_events import SourceEventStore
 
 
 def _required_string(value: object, path: str, errors: list[str]) -> None:
@@ -152,70 +154,102 @@ def run_pipeline(
         "duplicates": 0,
     }
     writer = GraphWriter(db)
+    event_store = SourceEventStore(db)
     for session_index, session in enumerate(doc["sessions"]):
-        if step_hook:
-            step_hook(
-                "read_active",
-                session_index=session_index,
-                session_count=len(doc["sessions"]),
-            )
-        active = fetch_active_claims(db)
-        if step_hook:
-            step_hook(
-                "extract",
-                session_index=session_index,
-                session_count=len(doc["sessions"]),
-                active_count=len(active),
-            )
-        drafts, warnings = extract_session(session, doc["entities"], active)
-        for warning in warnings:
-            print(f"warn [{session['session_id']}]: {warning}", file=sys.stderr)
-        if step_hook:
-            step_hook(
-                "reconcile",
-                session_index=session_index,
-                session_count=len(doc["sessions"]),
-                active_count=len(active),
-                draft_count=len(drafts),
-            )
-        plan = plan_writes(
-            drafts, active, doc["entities"], id_prefix=f"{scen}:{session['session_id']}"
-        )
-        for warning in plan["warnings"]:
-            print(f"warn [{session['session_id']}]: {warning}", file=sys.stderr)
-        if step_hook:
-            step_hook(
-                "graph_write",
-                session_index=session_index,
-                session_count=len(doc["sessions"]),
-                draft_count=len(drafts),
-                plan_create_count=len(plan["create"]),
-                plan_supersede_count=len(plan["supersede"]),
-                plan_contradict_count=len(plan["contradict"]),
-                plan_duplicate_count=plan["duplicates"],
-                applied=False,
-            )
-        applied = writer.apply_plan(plan, scen, doc["entities"])
-        stats["sessions"].append(
-            {
-                "session": session["session_id"],
-                "drafts": len(drafts),
-                "created": applied["created"],
-                "superseded": applied["superseded"],
-                "contradicted": applied["contradicted"],
-                "duplicates": applied["duplicates"],
+        for message in session["messages"]:
+            event = {
+                "source_kind": message["source_kind"],
+                "author": message["author"],
+                "occurred_at": message["ts"],
+                "content": message["text"],
+                "source_id": message["msg_id"],
             }
-        )
-        stats["created"] += applied["created"]
-        stats["superseded"] += applied["superseded"]
-        stats["contradicted"] += applied["contradicted"]
-        stats["duplicates"] += applied["duplicates"]
-        print(
-            f"{session['session_id']}: {applied['created']} created, "
-            f"{applied['superseded']} superseded, "
-            f"{applied['contradicted']} contradicted, "
-            f"{applied['duplicates']} duplicate(s)"
-        )
+            if step_hook:
+                step_hook(
+                    "capture",
+                    session_index=session_index,
+                    session_count=len(doc["sessions"]),
+                )
+            capture = event_store.capture(event)
+            event_key = capture["event_key"]
+            print(f"{event_key}: {capture['status']}")
+            attempt = event_store.start_extraction(
+                event_key,
+                "openai-compatible",
+                os.environ.get("LLM_MODEL", "kimi-k2"),
+                "extract-v1",
+            )
+            extraction_key = attempt["extraction_key"]
+            if step_hook:
+                step_hook(
+                    "read_active",
+                    session_index=session_index,
+                    session_count=len(doc["sessions"]),
+                )
+            active = fetch_active_claims(db)
+            one_message = {**session, "messages": [message]}
+            try:
+                if step_hook:
+                    step_hook("extract", active_count=len(active))
+                drafts, warnings = extract_session(one_message, doc["entities"], active)
+            except Exception as exc:
+                event_store.fail_extraction(extraction_key, "EXTRACT", exc)
+                raise
+            for warning in warnings:
+                print(f"warn [{message['msg_id']}]: {warning}", file=sys.stderr)
+            try:
+                if step_hook:
+                    step_hook("reconcile", draft_count=len(drafts))
+                plan = plan_writes(
+                    drafts,
+                    active,
+                    doc["entities"],
+                    id_prefix=f"{scen}:{message['msg_id']}",
+                )
+            except Exception as exc:
+                event_store.fail_extraction(extraction_key, "RECONCILE", exc)
+                raise
+            try:
+                if step_hook:
+                    step_hook(
+                        "graph_write",
+                        plan_create_count=len(plan["create"]),
+                        plan_supersede_count=len(plan["supersede"]),
+                        plan_contradict_count=len(plan["contradict"]),
+                        plan_duplicate_count=plan["duplicates"],
+                        applied=False,
+                    )
+                applied = writer.apply_plan(
+                    plan,
+                    scen,
+                    doc["entities"],
+                    extraction_key=extraction_key,
+                    source_event_keys={message["msg_id"]: event_key},
+                )
+            except Exception as exc:
+                event_store.fail_extraction(extraction_key, "WRITE", exc)
+                raise
+            event_store.complete_extraction(
+                extraction_key, [draft["id"] for draft in plan["create"]]
+            )
+            stats["sessions"].append(
+                {
+                    "session": session["session_id"],
+                    "event": event_key,
+                    "drafts": len(drafts),
+                    **{
+                        key: applied[key]
+                        for key in (
+                            "created",
+                            "superseded",
+                            "contradicted",
+                            "duplicates",
+                        )
+                    },
+                }
+            )
+            for key in ("created", "superseded", "contradicted", "duplicates"):
+                stats[key] += applied[key]
     return stats
 
 

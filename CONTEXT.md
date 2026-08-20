@@ -24,6 +24,18 @@ _Avoid_: Context, excerpt
 The author and source kind from which evidence comes.
 _Avoid_: Origin, provider
 
+**Source Event**:
+One exact accepted input occurrence with a processing state.
+_Avoid_: Raw memory, input blob
+
+**Extraction**:
+One explicit attempt to produce claims from one source event.
+_Avoid_: Background job, hidden process
+
+**Failure Record**:
+The exact stopped processing step and its complete error information.
+_Avoid_: Warning, skipped event
+
 **Provenance**:
 The relation from a claim through its evidence to its source.
 _Avoid_: Metadata, lineage
@@ -53,6 +65,9 @@ _Avoid_: Mode, strategy
 - A **Claim** describes exactly one **Subject** through exactly one **Predicate**.
 - A **Claim** has one **Evidence** record.
 - **Evidence** comes from one **Source**.
+- **Evidence** quotes one **Source Event**.
+- An **Extraction** reads one **Source Event** and can produce claims.
+- A failed **Extraction** has one **Failure Record**.
 - A **Claim** can supersede zero or more older **Claims**.
 - A **Claim** can conflict with zero or more active **Claims**.
 - A **Probe** measures claims for one **Subject** and an optional **Predicate**.

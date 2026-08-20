@@ -19,6 +19,10 @@ COMMAND_MODULES = (
     "hydraclaim.pipeline",
     "hydraclaim.benchmark",
     "hydraclaim.longmemeval",
+    "hydraclaim.record",
+    "hydraclaim.process",
+    "hydraclaim.status",
+    "hydraclaim.events",
 )
 
 

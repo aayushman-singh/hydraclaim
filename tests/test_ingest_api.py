@@ -12,6 +12,37 @@ class EmptyDB:
         return []
 
 
+def _message():
+    return {
+        "msg_id": "message-1",
+        "ts": "2026-08-20T10:00:00+00:00",
+        "author": "Asha Rao",
+        "source_kind": "slack",
+        "channel": "general",
+        "text": "The project is active.",
+    }
+
+
+def _stub_event_store(monkeypatch):
+    class Store:
+        def __init__(self, db):
+            pass
+
+        def capture(self, event):
+            return {"event_key": "event-1", "status": "CAPTURED", "created": True}
+
+        def start_extraction(self, *args, **kwargs):
+            return {"extraction_key": "extraction-1", "status": "RUNNING"}
+
+        def fail_extraction(self, *args, **kwargs):
+            return {"status": "FAILED"}
+
+        def complete_extraction(self, *args, **kwargs):
+            return {"status": "SUCCEEDED"}
+
+    monkeypatch.setattr("hydraclaim.pipeline.SourceEventStore", Store)
+
+
 def test_write_auth_no_key_configured(monkeypatch):
     """When HYDRACLAIM_WRITE_KEY is empty, write endpoints fail closed."""
     monkeypatch.setattr(serve, "WRITE_KEY", "")
@@ -132,6 +163,7 @@ def test_ingest_failure_logs_step_and_traceback(caplog, monkeypatch):
 
 def test_preformatted_failure_logs_read_active_state(caplog, monkeypatch):
     monkeypatch.setenv("LLM_API_KEY", "fake")
+    _stub_event_store(monkeypatch)
 
     def raising_reader(db):
         raise RuntimeError("active read failed")
@@ -139,7 +171,7 @@ def test_preformatted_failure_logs_read_active_state(caplog, monkeypatch):
     monkeypatch.setattr("hydraclaim.pipeline.fetch_active_claims", raising_reader)
     request = {
         "scenario_id": "safe-scenario",
-        "sessions": [{"session_id": "session-1", "messages": []}],
+        "sessions": [{"session_id": "session-1", "messages": [_message()]}],
         "entities": [{"name": "Ada", "type": "person"}],
     }
 
@@ -159,6 +191,7 @@ def test_preformatted_failure_logs_read_active_state(caplog, monkeypatch):
 
 def test_preformatted_failure_logs_extract_state(caplog, monkeypatch):
     monkeypatch.setenv("LLM_API_KEY", "fake")
+    _stub_event_store(monkeypatch)
     monkeypatch.setattr("hydraclaim.pipeline.fetch_active_claims", lambda db: [])
 
     def raising_extractor(session, entities, active):
@@ -167,7 +200,7 @@ def test_preformatted_failure_logs_extract_state(caplog, monkeypatch):
     monkeypatch.setattr("hydraclaim.pipeline.extract_session", raising_extractor)
     request = {
         "scenario_id": "extract-scenario",
-        "sessions": [{"session_id": "session-1", "messages": []}],
+        "sessions": [{"session_id": "session-1", "messages": [_message()]}],
         "entities": [],
     }
 
@@ -183,6 +216,7 @@ def test_preformatted_failure_logs_extract_state(caplog, monkeypatch):
 
 def test_preformatted_failure_logs_reconcile_state(caplog, monkeypatch):
     monkeypatch.setenv("LLM_API_KEY", "fake")
+    _stub_event_store(monkeypatch)
     monkeypatch.setattr("hydraclaim.pipeline.fetch_active_claims", lambda db: [])
     monkeypatch.setattr(
         "hydraclaim.pipeline.extract_session",
@@ -195,7 +229,7 @@ def test_preformatted_failure_logs_reconcile_state(caplog, monkeypatch):
     monkeypatch.setattr("hydraclaim.pipeline.plan_writes", raising_reconciler)
     request = {
         "scenario_id": "reconcile-scenario",
-        "sessions": [{"session_id": "session-1", "messages": []}],
+        "sessions": [{"session_id": "session-1", "messages": [_message()]}],
         "entities": [],
     }
 
@@ -211,6 +245,7 @@ def test_preformatted_failure_logs_reconcile_state(caplog, monkeypatch):
 
 def test_preformatted_failure_logs_graph_write_state(caplog, monkeypatch):
     monkeypatch.setenv("LLM_API_KEY", "fake")
+    _stub_event_store(monkeypatch)
     monkeypatch.setattr("hydraclaim.pipeline.fetch_active_claims", lambda db: [])
     monkeypatch.setattr(
         "hydraclaim.pipeline.extract_session",
@@ -231,13 +266,13 @@ def test_preformatted_failure_logs_graph_write_state(caplog, monkeypatch):
         def __init__(self, db):
             pass
 
-        def apply_plan(self, plan, scenario_id, entities):
+        def apply_plan(self, plan, scenario_id, entities, **kwargs):
             raise RuntimeError("graph write failed")
 
     monkeypatch.setattr("hydraclaim.pipeline.GraphWriter", RaisingWriter)
     request = {
         "scenario_id": "graph-scenario",
-        "sessions": [{"session_id": "session-1", "messages": []}],
+        "sessions": [{"session_id": "session-1", "messages": [_message()]}],
         "entities": [],
     }
 
