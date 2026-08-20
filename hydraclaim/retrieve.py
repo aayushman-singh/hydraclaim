@@ -27,7 +27,6 @@ from hydraclaim.model import split_aliases
 from hydraclaim.probe import probe
 from hydraclaim.router import (
     ROUTE_ABSTAIN,
-    ROUTE_DEEP,
     ROUTE_FAST,
     Classification,
     classify,
@@ -38,7 +37,9 @@ from hydraclaim.scoring import rank_claims
 
 def fetch_entities(db: HydraDB) -> list[dict]:
     rows = db.query("MATCH (e:Entity) RETURN e.name AS name, e.aliases AS aliases")
-    return [{"name": r["name"], "aliases": split_aliases(r.get("aliases"))} for r in rows]
+    return [
+        {"name": r["name"], "aliases": split_aliases(r.get("aliases"))} for r in rows
+    ]
 
 
 def fetch_claims(
@@ -88,6 +89,7 @@ RETURN older.id AS id, older.value AS value,
 
 # --- deterministic answer builders (pure, unit-tested) ----------------------
 
+
 def _citation(claim: dict) -> dict:
     return {
         "claim_id": claim.get("key") or claim["id"],
@@ -102,11 +104,15 @@ def _citation(claim: dict) -> dict:
 
 def abstain_message(subject: str, predicate: str | None) -> str:
     if predicate:
-        return (f"I don't have any recorded information about the {predicate} of "
-                f"'{subject}'. I searched claims about '{subject}' with predicate "
-                f"'{predicate}' and found none — the answer is not in the history.")
-    return (f"I don't have any recorded information about '{subject}'. I searched "
-            f"all claims about that entity and found none.")
+        return (
+            f"I don't have any recorded information about the {predicate} of "
+            f"'{subject}'. I searched claims about '{subject}' with predicate "
+            f"'{predicate}' and found none — the answer is not in the history."
+        )
+    return (
+        f"I don't have any recorded information about '{subject}'. I searched "
+        f"all claims about that entity and found none."
+    )
 
 
 def abstain_uncovered_message(subject: str, available: list[str]) -> str:
@@ -115,9 +121,11 @@ def abstain_uncovered_message(subject: str, available: list[str]) -> str:
     if not available:
         return abstain_message(subject, None)
     tracked = ", ".join(available)
-    return (f"I don't have a recorded fact that answers that about '{subject}'. "
-            f"The claims I track for '{subject}' cover: {tracked} — none of those "
-            f"match the question, so the answer is not in the history.")
+    return (
+        f"I don't have a recorded fact that answers that about '{subject}'. "
+        f"The claims I track for '{subject}' cover: {tracked} — none of those "
+        f"match the question, so the answer is not in the history."
+    )
 
 
 # Origin questions ("when was X first set?") ask for the earliest claim in the
@@ -129,7 +137,7 @@ def build_fast_answer(claim: dict) -> str:
     return (
         f"{claim['subject']} — {claim['predicate']}: {claim['value']} "
         f"(as of {claim['valid_from']}, per {claim.get('source_kind')}/"
-        f"{claim.get('author')}: \"{claim.get('quote')}\")"
+        f'{claim.get("author")}: "{claim.get("quote")}")'
     )
 
 
@@ -164,7 +172,7 @@ def build_conflict_answer(
     for claim, score in ranked:
         lines.append(
             f"  - {claim['value']} — {claim.get('source_kind')}/{claim.get('author')}, "
-            f"{claim['valid_from']} (trust {score:.2f}): \"{claim.get('quote')}\""
+            f'{claim["valid_from"]} (trust {score:.2f}): "{claim.get("quote")}"'
         )
     winner = ranked[0][0]
     lines.append(
@@ -176,21 +184,34 @@ def build_conflict_answer(
 
 # --- orchestration ----------------------------------------------------------
 
+
 def answer(
     db: HydraDB,
     question: str,
     *,
     now: datetime | None = None,
     force_route: str | None = None,
+    classification_mode: str = "heuristic",
     llm_fn=None,
 ) -> dict:
     now = now or datetime.now(timezone.utc)
     roster = fetch_entities(db)
-    cls: Classification = classify(question, roster, llm_fn=llm_fn, now=now)
+    cls: Classification = classify(
+        question,
+        roster,
+        mode=classification_mode,
+        llm_fn=llm_fn,
+        now=now,
+    )
 
     if cls.subject is None:
-        return {"route": ROUTE_ABSTAIN, "answer": abstain_message(question, None),
-                "citations": [], "classification": asdict(cls), "probe": None}
+        return {
+            "route": ROUTE_ABSTAIN,
+            "answer": abstain_message(question, None),
+            "citations": [],
+            "classification": asdict(cls),
+            "probe": None,
+        }
 
     p = probe(db, cls.subject, cls.predicate)
     route = force_route or decide_route(cls.question_type, p)
@@ -205,47 +226,74 @@ def answer(
             msg = abstain_message(cls.subject, cls.predicate)
         return {**base, "route": route, "answer": msg, "citations": []}
 
-    active = fetch_claims(db, cls.subject, cls.predicate, active_only=True,
-                          as_of=cls.as_of)
+    active = fetch_claims(
+        db, cls.subject, cls.predicate, active_only=True, as_of=cls.as_of
+    )
     if not active:
-        return {**base, "route": ROUTE_ABSTAIN,
-                "answer": (abstain_message(cls.subject, cls.predicate) +
-                           " (Claims exist in history, but none are currently active"
-                           + (f" as of {cls.as_of}." if cls.as_of else ".")),
-                "citations": []}
+        return {
+            **base,
+            "route": ROUTE_ABSTAIN,
+            "answer": (
+                abstain_message(cls.subject, cls.predicate)
+                + " (Claims exist in history, but none are currently active"
+                + (f" as of {cls.as_of}." if cls.as_of else ".")
+            ),
+            "citations": [],
+        }
 
     if cls.predicate and _ORIGIN_RE.search(question):
         history = fetch_claims(db, cls.subject, cls.predicate)
         if history:
-            oldest = min(history,
-                         key=lambda r: (r["valid_from"], str(r.get("key") or r["id"])))
-            return {**base, "route": route,
-                    "answer": build_fast_answer(oldest),
-                    "citations": [_citation(oldest)]}
+            oldest = min(
+                history, key=lambda r: (r["valid_from"], str(r.get("key") or r["id"]))
+            )
+            return {
+                **base,
+                "route": route,
+                "answer": build_fast_answer(oldest),
+                "citations": [_citation(oldest)],
+            }
 
     if cls.question_type == "temporal" and cls.predicate:
         history = fetch_claims(db, cls.subject, cls.predicate)
         if "before the most recent change" in question.lower() and len(history) >= 2:
             current, previous = history[0], history[1]
-            return {**base, "route": route,
-                    "answer": build_temporal_answer(current, previous),
-                    "citations": [_citation(previous)]}
+            return {
+                **base,
+                "route": route,
+                "answer": build_temporal_answer(current, previous),
+                "citations": [_citation(previous)],
+            }
 
     if route == ROUTE_FAST:
-        return {**base, "route": route, "answer": build_fast_answer(active[0]),
-                "citations": [_citation(active[0])]}
+        return {
+            **base,
+            "route": route,
+            "answer": build_fast_answer(active[0]),
+            "citations": [_citation(active[0])],
+        }
 
     # DEEP: pull the full conflict subgraph.
     conflicts = p.conflicts > 0 or p.distinct_active_values > 1
     if conflicts:
         ranked = rank_claims(active, cls.predicate or "", now)
-        return {**base, "route": route,
-                "answer": build_conflict_answer(cls.subject, cls.predicate or "", ranked),
-                "citations": [_citation(c) for c, _ in ranked]}
+        return {
+            **base,
+            "route": route,
+            "answer": build_conflict_answer(cls.subject, cls.predicate or "", ranked),
+            "citations": [_citation(c) for c, _ in ranked],
+        }
     chain = fetch_chain(db, active[0]["id"])
     if chain:
-        return {**base, "route": route,
-                "answer": build_chain_answer(active[0], chain),
-                "citations": [_citation(active[0])]}
-    return {**base, "route": route, "answer": build_fast_answer(active[0]),
-            "citations": [_citation(active[0])]}
+        return {
+            **base,
+            "route": route,
+            "answer": build_chain_answer(active[0], chain),
+            "citations": [_citation(active[0])],
+        }
+    return {
+        **base,
+        "route": route,
+        "answer": build_fast_answer(active[0]),
+        "citations": [_citation(active[0])],
+    }

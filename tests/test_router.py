@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
 
+import pytest
+
 from hydraclaim.probe import ProbeResult
 from hydraclaim.router import (
     ROUTE_ABSTAIN,
@@ -20,8 +22,14 @@ NOW = datetime(2026, 5, 25, tzinfo=timezone.utc)
 
 
 def _probe(**kw):
-    defaults = dict(subject="payments integration", predicate="owned_by",
-                    coverage=2, conflicts=0, distinct_active_values=1, chain_depth=0)
+    defaults = dict(
+        subject="payments integration",
+        predicate="owned_by",
+        coverage=2,
+        conflicts=0,
+        distinct_active_values=1,
+        chain_depth=0,
+    )
     defaults.update(kw)
     return ProbeResult(**defaults)
 
@@ -89,8 +97,13 @@ def test_classify_uses_llm_output_when_valid():
     cls = classify(
         "Who owns the payments integration?",
         ROSTER,
-        llm_fn=lambda q: {"subject": "payments", "predicate": "owned_by",
-                          "question_type": "lookup", "as_of": None},
+        mode="llm",
+        llm_fn=lambda q: {
+            "subject": "payments",
+            "predicate": "owned_by",
+            "question_type": "lookup",
+            "as_of": None,
+        },
         now=NOW,
     )
     assert cls.subject == "payments integration"  # canonicalized from alias
@@ -101,8 +114,12 @@ def test_classify_falls_back_on_bad_llm_output():
     cls = classify(
         "Who owns the payments integration?",
         ROSTER,
-        llm_fn=lambda q: {"subject": None, "predicate": "not-a-predicate",
-                          "question_type": "weird"},
+        mode="llm",
+        llm_fn=lambda q: {
+            "subject": None,
+            "predicate": "not-a-predicate",
+            "question_type": "weird",
+        },
         now=NOW,
     )
     assert cls.subject == "payments integration"  # heuristic rescued it
@@ -110,9 +127,28 @@ def test_classify_falls_back_on_bad_llm_output():
     assert cls.question_type == "lookup"
 
 
-def test_classify_falls_back_when_llm_raises():
+def test_classify_llm_mode_propagates_when_llm_raises():
     def boom(q):
         raise RuntimeError("provider down")
 
-    cls = classify("Who owns the payments integration?", ROSTER, llm_fn=boom, now=NOW)
-    assert cls.predicate == "owned_by"
+    with pytest.raises(RuntimeError, match="provider down"):
+        classify(
+            "Who owns the payments integration?",
+            ROSTER,
+            mode="llm",
+            llm_fn=boom,
+            now=NOW,
+        )
+
+
+def test_llm_mode_propagates_classifier_error():
+    def broken(_prompt):
+        raise RuntimeError("classifier unavailable")
+
+    with pytest.raises(RuntimeError, match="classifier unavailable"):
+        classify("Who owns launch?", ROSTER, mode="llm", llm_fn=broken)
+
+
+def test_unknown_classification_mode_fails():
+    with pytest.raises(ValueError, match="classification mode"):
+        classify("Who owns launch?", ROSTER, mode="auto")

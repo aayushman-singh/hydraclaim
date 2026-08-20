@@ -12,11 +12,8 @@ Endpoints:
   POST /ingest/slack          -> Slack export -> sessions -> ingest pipeline
 
 Stdlib HTTP only — no new runtime dependencies. Question classification uses
-the LLM when LLM_API_KEY is set (any OpenAI-compatible endpoint via
-LLM_BASE_URL/LLM_MODEL); otherwise the keyword heuristic classifies. On an
-LLM error the router degrades to the heuristic (its designed behavior) and
-the failure is logged loudly in the service journal — request routing never
-silently breaks.
+the keyword heuristic by default. The --llm option selects LLM classification
+and stops the request when the LLM fails.
 """
 
 from __future__ import annotations
@@ -38,26 +35,20 @@ DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "sessions"
 def llm_classifier(question: str) -> dict:
     """LLM question classification (grounded in the predicate vocabulary).
 
-    hydraclaim.router.classify degrades to the keyword heuristic on LLM
-    errors — that is its designed behavior — but the failure is logged loudly
-    here with a traceback so it is never silent in the service journal.
+    Errors propagate to the request handler so the selected classification mode
+    does not change during a request.
     """
     from hydraclaim.router import llm_classifier as _classify
 
-    try:
-        return _classify(question)
-    except Exception:
-        import traceback
-
-        print(f"ERROR: LLM classification failed for question {question!r} — "
-              "degrading to keyword heuristic",
-              file=sys.stderr, flush=True)
-        traceback.print_exc()
-        raise
+    return _classify(question)
 
 
-def handle_ask(question: str, db, llm_fn) -> dict[str, Any]:
-    result = retrieve.answer(db, question, llm_fn=llm_fn)
+def handle_ask(
+    question: str, db, llm_fn, classification_mode: str = "heuristic"
+) -> dict[str, Any]:
+    result = retrieve.answer(
+        db, question, classification_mode=classification_mode, llm_fn=llm_fn
+    )
     return result
 
 
@@ -65,11 +56,13 @@ def handle_scenarios() -> dict[str, Any]:
     scenarios = []
     for path in sorted(DATA_DIR.glob("*.json")):
         doc = json.loads(path.read_text(encoding="utf-8"))
-        scenarios.append({
-            "id": doc["scenario_id"],
-            "description": doc.get("description", ""),
-            "questions": [qa["question"] for qa in doc["ground_truth"]["qa"]],
-        })
+        scenarios.append(
+            {
+                "id": doc["scenario_id"],
+                "description": doc.get("description", ""),
+                "questions": [qa["question"] for qa in doc["ground_truth"]["qa"]],
+            }
+        )
     return {"scenarios": scenarios}
 
 
@@ -137,10 +130,15 @@ def handle_suggestions(llm_fn) -> dict[str, Any]:
         f"[{b['route']}] {b['text']}" for b in baseline["suggestions"]
     )
     try:
-        result = chat_json([
-            {"role": "system", "content": _SUGGESTION_SYSTEM},
-            {"role": "user", "content": "Ground-truth questions by route:\n" + bucket_text},
-        ])
+        result = chat_json(
+            [
+                {"role": "system", "content": _SUGGESTION_SYSTEM},
+                {
+                    "role": "user",
+                    "content": "Ground-truth questions by route:\n" + bucket_text,
+                },
+            ]
+        )
         suggestions = result.get("suggestions", []) if isinstance(result, dict) else []
         if (
             suggestions
@@ -158,36 +156,62 @@ def handle_suggestions(llm_fn) -> dict[str, Any]:
             if deduped:
                 return {"suggestions": deduped}
     except Exception as exc:
-        print(f"ERROR: suggestion generation failed — falling back to "
-              f"deterministic selection ({exc})", file=sys.stderr, flush=True)
+        print(
+            f"ERROR: suggestion generation failed — falling back to "
+            f"deterministic selection ({exc})",
+            file=sys.stderr,
+            flush=True,
+        )
     return baseline
 
 
 def handle_graph(db) -> dict[str, Any]:
     """Compact graph for visualization: entities + claims + relation edges."""
-    entities = db.query("MATCH (e:Entity) RETURN e.id AS id, e.name AS name, "
-                        "e.type AS type")
+    entities = db.query(
+        "MATCH (e:Entity) RETURN e.id AS id, e.name AS name, e.type AS type"
+    )
     claims = db.query("""
 MATCH (c:Claim)-[:ABOUT]->(e:Entity)
 RETURN c.id AS id, c.key AS key, e.name AS subject, c.predicate AS predicate,
        c.value AS value, c.status AS status, c.valid_from AS valid_from,
        c.valid_to AS valid_to""")
     edges: list[dict[str, Any]] = []
-    for row in db.query("MATCH (a:Claim)-[:SUPERSEDES]->(b:Claim) "
-                        "RETURN a.id AS src, b.id AS dst"):
+    for row in db.query(
+        "MATCH (a:Claim)-[:SUPERSEDES]->(b:Claim) RETURN a.id AS src, b.id AS dst"
+    ):
         edges.append({"from": row["src"], "to": row["dst"], "type": "SUPERSEDES"})
-    for row in db.query("MATCH (a:Claim)-[:CONTRADICTS]->(b:Claim) "
-                        "RETURN a.id AS src, b.id AS dst"):
+    for row in db.query(
+        "MATCH (a:Claim)-[:CONTRADICTS]->(b:Claim) RETURN a.id AS src, b.id AS dst"
+    ):
         edges.append({"from": row["src"], "to": row["dst"], "type": "CONTRADICTS"})
     entity_id_by_name = {e["name"]: e["id"] for e in entities}
     for claim in claims:
-        edges.append({"from": claim["id"], "to": entity_id_by_name[claim["subject"]],
-                      "type": "ABOUT"})
-    nodes = ([{"id": e["id"], "label": e["name"], "kind": "entity",
-               "type": e.get("type", "unknown")} for e in entities]
-             + [{"id": c["id"], "label": f"{c['predicate']}: {c['value']}",
-                 "kind": "claim", "key": c["key"], "subject": c["subject"],
-                 "status": c["status"]} for c in claims])
+        edges.append(
+            {
+                "from": claim["id"],
+                "to": entity_id_by_name[claim["subject"]],
+                "type": "ABOUT",
+            }
+        )
+    nodes = [
+        {
+            "id": e["id"],
+            "label": e["name"],
+            "kind": "entity",
+            "type": e.get("type", "unknown"),
+        }
+        for e in entities
+    ] + [
+        {
+            "id": c["id"],
+            "label": f"{c['predicate']}: {c['value']}",
+            "kind": "claim",
+            "key": c["key"],
+            "subject": c["subject"],
+            "status": c["status"],
+        }
+        for c in claims
+    ]
     return {"nodes": nodes, "edges": edges}
 
 
@@ -204,9 +228,16 @@ def _check_write_auth(headers: dict) -> tuple[int, dict] | None:
     return 401, {"error": "invalid or missing write key"}
 
 
-def dispatch(method: str, path: str, body: dict, db, llm_fn,
-             headers: dict | None = None,
-             remote_addr: str | None = None) -> tuple[int, dict, dict | None]:
+def dispatch(
+    method: str,
+    path: str,
+    body: dict,
+    db,
+    llm_fn,
+    headers: dict | None = None,
+    remote_addr: str | None = None,
+    classification_mode: str = "heuristic",
+) -> tuple[int, dict, dict | None]:
     """Route a request to a handler. Returns (status, payload, extra_headers).
 
     `extra_headers` is None in the common case and only carries things like
@@ -216,15 +247,25 @@ def dispatch(method: str, path: str, body: dict, db, llm_fn,
 
     def _rate_limit(name: str) -> tuple[int, dict, dict] | None:
         """Return a 429 response if the client exceeded `name`, else None."""
-        client = limiter.client_key(headers.get("x-forwarded-for", ""),
-                                    remote_addr or "")
+        client = limiter.client_key(
+            headers.get("x-forwarded-for", ""), remote_addr or ""
+        )
         allowed, retry_after = limiter.hit(client, name)
         if not allowed:
-            print(f"WARN: rate limit '{name}' hit for {client}; "
-                  f"blocking until ~{retry_after}s", file=sys.stderr, flush=True)
-            return (429, {"error": f"rate limit exceeded for {name}. "
-                                   f"Try again in about {retry_after}s."},
-                    {"Retry-After": str(retry_after)})
+            print(
+                f"WARN: rate limit '{name}' hit for {client}; "
+                f"blocking until ~{retry_after}s",
+                file=sys.stderr,
+                flush=True,
+            )
+            return (
+                429,
+                {
+                    "error": f"rate limit exceeded for {name}. "
+                    f"Try again in about {retry_after}s."
+                },
+                {"Retry-After": str(retry_after)},
+            )
         return None
 
     if method == "GET" and path == "/health":
@@ -246,12 +287,14 @@ def dispatch(method: str, path: str, body: dict, db, llm_fn,
         if blocked:
             return blocked
         from hydraclaim.db import HydraDBError
+
         try:
-            return 200, handle_ask(question, db, llm_fn), None
+            return 200, handle_ask(question, db, llm_fn, classification_mode), None
         except HydraDBError as exc:
             return 502, {"error": f"graph backend failed: {exc}"}, None
     if method == "GET" and path == "/graph":
         from hydraclaim.db import HydraDBError
+
         try:
             return 200, handle_graph(db), None
         except HydraDBError as exc:
@@ -265,9 +308,11 @@ def dispatch(method: str, path: str, body: dict, db, llm_fn,
             return blocked
         if method == "POST" and path == "/ingest":
             from hydraclaim.ingest_api import handle_ingest
+
             status, payload = handle_ingest(body, db)
             return status, payload, None
         from hydraclaim.ingest_api import handle_ingest_slack
+
         status, payload = handle_ingest_slack(body, db)
         return status, payload, None
     return 404, {"error": f"unknown endpoint: {method} {path}"}, None
@@ -289,6 +334,7 @@ class DemoHandler(BaseHTTPRequestHandler):
 
     def _dispatch(self) -> tuple[int, dict, dict | None]:
         llm_fn = self.server.llm_fn  # type: ignore[attr-defined]
+        classification_mode = getattr(self.server, "classification_mode", "heuristic")
         try:
             if self.command == "POST":
                 length = int(self.headers.get("Content-Length") or 0)
@@ -300,8 +346,16 @@ class DemoHandler(BaseHTTPRequestHandler):
             path = self.path.split("?", 1)[0].rstrip("/") or "/"
             hdrs = {k.lower(): v for k, v in self.headers.items()}
             remote_addr = self.client_address[0] if self.client_address else None
-            return dispatch(self.command, path, body, self.server.db, llm_fn,
-                            hdrs, remote_addr)  # type: ignore[attr-defined]
+            return dispatch(
+                self.command,
+                path,
+                body,
+                self.server.db,
+                llm_fn,
+                hdrs,
+                remote_addr,
+                classification_mode,
+            )  # type: ignore[attr-defined]
         except json.JSONDecodeError:
             return 400, {"error": "request body must be JSON"}, None
 
@@ -326,19 +380,24 @@ def main() -> None:
     parser = argparse.ArgumentParser(prog="hydraclaim.serve")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--llm", action="store_true",
-                        help="use the LLM for question classification "
-                             "(requires LLM_API_KEY); default is the keyword heuristic")
+    parser.add_argument(
+        "--llm",
+        action="store_true",
+        help="use the LLM for question classification "
+        "(requires LLM_API_KEY); default is the keyword heuristic",
+    )
     args = parser.parse_args()
 
     from hydraclaim.config import connect
 
-    llm_fn = llm_classifier if args.llm and os.environ.get("LLM_API_KEY") else None
+    classification_mode = "llm" if args.llm else "heuristic"
+    llm_fn = llm_classifier if args.llm else None
     db = connect()
     server = ThreadingHTTPServer((args.host, args.port), DemoHandler)
     server.db = db  # type: ignore[attr-defined]
     server.llm_fn = llm_fn  # type: ignore[attr-defined]
-    mode = "LLM classification" if llm_fn else "heuristic classification"
+    server.classification_mode = classification_mode  # type: ignore[attr-defined]
+    mode = f"{classification_mode} classification"
     print(f"hydraclaim.serve listening on http://{args.host}:{args.port} ({mode})")
     try:
         server.serve_forever()

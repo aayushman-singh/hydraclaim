@@ -1,10 +1,10 @@
 """Two-stage router: question classification, then graph-probe routing.
 
-Stage 1 (classify): {subject, predicate, question_type, as_of}. Uses the LLM
-when available, with a deterministic keyword heuristic as fallback — the
-heuristic also makes the demo runnable with no LLM key at all. Conflict and
-abstention are deliberately NOT inferred from wording; they come from the
-probe (stage 2), because question phrasing is a weak predictor of graph state.
+Stage 1 (classify): {subject, predicate, question_type, as_of}. The caller
+selects either deterministic keyword classification or LLM classification.
+Conflict and abstention are deliberately NOT inferred from wording; they come
+from the probe (stage 2), because question phrasing is a weak predictor of
+graph state.
 
 Stage 2 (decide_route), per PLAN.md:
     predicate is None (question maps to no tracked fact)   -> ABSTAIN
@@ -29,29 +29,65 @@ ROUTE_DEEP = "DEEP"
 ROUTE_ABSTAIN = "ABSTAIN"
 
 QUESTION_TYPES = frozenset(
-    {"lookup", "temporal", "conflict", "knowledge_update", "multi_session", "abstention"}
+    {
+        "lookup",
+        "temporal",
+        "conflict",
+        "knowledge_update",
+        "multi_session",
+        "abstention",
+    }
 )
 
 # Checked in order; first hit wins. Keep specific predicates above generic ones.
 _PREDICATE_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     ("owned_by", ("own", "owner", "who owns")),
-    ("assigned_to", ("assign", "on the team", "which team", "joining the", "moved to the")),
+    (
+        "assigned_to",
+        ("assign", "on the team", "which team", "joining the", "moved to the"),
+    ),
     ("deadline", ("deadline", "due date", "due")),
-    ("status", ("status", "at risk", "on track", "blocked", "blocker", "blocking",
-                "complete", "delayed", "green", "red")),
+    (
+        "status",
+        (
+            "status",
+            "at risk",
+            "on track",
+            "blocked",
+            "blocker",
+            "blocking",
+            "complete",
+            "delayed",
+            "green",
+            "red",
+        ),
+    ),
     ("decided", ("decid", "approved")),
     ("depends_on", ("depend", "blocked by", "waiting on")),
     ("blocks", ("blocks",)),
     ("reports_to", ("reports to", "report to", "reporting to", "manager")),
     ("works_on", ("working on", "works on")),
-    ("located_in", ("located", "based in", "based", "where is", "where was", "where does")),
+    (
+        "located_in",
+        ("located", "based in", "based", "where is", "where was", "where does"),
+    ),
     ("prefers", ("prefer",)),
     ("budget", ("budget", "cost", "how much")),
 ]
 
-_TEMPORAL_MARKERS = ("before", "previously", "used to", "originally",
-                     "at the start", "earlier", "last week", "last month",
-                     "was blocking", "blocking the", "as of")
+_TEMPORAL_MARKERS = (
+    "before",
+    "previously",
+    "used to",
+    "originally",
+    "at the start",
+    "earlier",
+    "last week",
+    "last month",
+    "was blocking",
+    "blocking the",
+    "as of",
+)
 _UPDATE_MARKERS = ("current", "currently", "now", "latest", "today")
 
 
@@ -91,18 +127,20 @@ def llm_classifier(question: str) -> dict:
     """LLM question classification grounded in the predicate vocabulary."""
     from hydraclaim.llm import chat_json
 
-    return chat_json([
-        {"role": "system", "content": _CLASSIFIER_SYSTEM},
-        {"role": "user", "content": question},
-    ])
+    return chat_json(
+        [
+            {"role": "system", "content": _CLASSIFIER_SYSTEM},
+            {"role": "user", "content": question},
+        ]
+    )
 
 
 @dataclass
 class Classification:
-    subject: str | None      # canonical entity name, None if nothing matched
+    subject: str | None  # canonical entity name, None if nothing matched
     predicate: str | None
     question_type: str
-    as_of: str | None        # ISO date for time-travel questions
+    as_of: str | None  # ISO date for time-travel questions
 
 
 def _find_subject(question: str, roster: list[dict]) -> str | None:
@@ -145,39 +183,56 @@ def heuristic_classify(
     )
 
 
+def _classify_with_llm(
+    question: str,
+    roster: list[dict],
+    *,
+    llm_fn,
+    now: datetime | None = None,
+) -> Classification:
+    """Classify with an injected LLM function.
+
+    The LLM function takes a question string and returns a dictionary with
+    any of {subject, predicate, question_type, as_of}. Invalid fields use the
+    deterministic interpretation, but errors from the classifier propagate.
+    """
+    fallback = heuristic_classify(question, roster, now)
+    raw = llm_fn(question)
+    if not isinstance(raw, dict):
+        raise ValueError("classifier returned non-dict")
+    subject = raw.get("subject")
+    predicate = raw.get("predicate")
+    question_type = raw.get("question_type")
+    return Classification(
+        subject=(
+            canonicalize_entity(subject, roster)
+            if isinstance(subject, str) and subject.strip()
+            else fallback.subject
+        ),
+        predicate=(predicate if predicate in PREDICATES else fallback.predicate),
+        question_type=(
+            question_type if question_type in QUESTION_TYPES else fallback.question_type
+        ),
+        as_of=(str(raw["as_of"])[:10] if raw.get("as_of") else fallback.as_of),
+    )
+
+
 def classify(
     question: str,
     roster: list[dict],
+    *,
+    mode: str = "heuristic",
     llm_fn=None,
     now: datetime | None = None,
 ) -> Classification:
-    """LLM classification with deterministic fallback.
-
-    `llm_fn` takes a question string and returns a dict with any of
-    {subject, predicate, question_type, as_of}; injectable for tests. When it
-    is None — or its output is unusable — the heuristic decides everything.
-    """
-    fallback = heuristic_classify(question, roster, now)
+    """Classify a question using the explicitly selected mode."""
+    if mode == "heuristic":
+        return heuristic_classify(question, roster, now=now)
+    if mode != "llm":
+        raise ValueError(f"unknown classification mode: {mode!r}")
     if llm_fn is None:
-        return fallback
-    try:
-        raw = llm_fn(question)
-        if not isinstance(raw, dict):
-            raise ValueError("classifier returned non-dict")
-        subject = raw.get("subject")
-        predicate = raw.get("predicate")
-        question_type = raw.get("question_type")
-        return Classification(
-            subject=(canonicalize_entity(subject, roster)
-                     if isinstance(subject, str) and subject.strip()
-                     else fallback.subject),
-            predicate=(predicate if predicate in PREDICATES else fallback.predicate),
-            question_type=(question_type if question_type in QUESTION_TYPES
-                           else fallback.question_type),
-            as_of=(str(raw["as_of"])[:10] if raw.get("as_of") else fallback.as_of),
-        )
-    except Exception:
-        return fallback
+        raise ValueError("llm classification mode requires llm_fn")
+    return _classify_with_llm(question, roster, llm_fn=llm_fn, now=now)
 
 
 def decide_route(question_type: str, probe: ProbeResult) -> str:

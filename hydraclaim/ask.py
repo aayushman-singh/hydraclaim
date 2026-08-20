@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 
 
 def _llm_classifier(question: str) -> dict:
@@ -23,29 +22,46 @@ def _llm_classifier(question: str) -> dict:
 
 def _print_result(result: dict, verbose: bool) -> None:
     if verbose:
-        print(json.dumps({"route": result["route"],
-                          "classification": result["classification"],
-                          "probe": result["probe"]}, indent=2))
+        print(
+            json.dumps(
+                {
+                    "route": result["route"],
+                    "classification": result["classification"],
+                    "probe": result["probe"],
+                },
+                indent=2,
+            )
+        )
         print()
     print(result["answer"])
     for citation in result["citations"]:
-        print(f"  [{citation['claim_id']}] {citation['source_kind']}/"
-              f"{citation['author']}: \"{citation['quote']}\"")
+        print(
+            f"  [{citation['claim_id']}] {citation['source_kind']}/"
+            f'{citation["author"]}: "{citation["quote"]}"'
+        )
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="hydraclaim.ask")
-    parser.add_argument("question", nargs="?",
-                        help="natural-language question (required unless --repl)")
-    parser.add_argument("--verbose", "-v", action="store_true",
-                        help="print classification, probe result, and route")
-    parser.add_argument("--llm", action="store_true",
-                        help="use the LLM for question classification")
-    parser.add_argument("--repl", action="store_true",
-                        help="read questions from stdin in a loop")
+    parser.add_argument(
+        "question", nargs="?", help="natural-language question (required unless --repl)"
+    )
+    parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="print classification, probe result, and route",
+    )
+    parser.add_argument(
+        "--llm", action="store_true", help="use the LLM for question classification"
+    )
+    parser.add_argument(
+        "--repl", action="store_true", help="read questions from stdin in a loop"
+    )
     args = parser.parse_args()
 
-    llm_fn = _llm_classifier if args.llm and os.environ.get("LLM_API_KEY") else None
+    classification_mode = "llm" if args.llm else "heuristic"
+    llm_fn = _llm_classifier if args.llm else None
 
     from hydraclaim.config import connect
     from hydraclaim.retrieve import answer
@@ -59,14 +75,24 @@ def main() -> None:
                     break
                 if not question.strip():
                     break
-                _print_result(answer(db, question, llm_fn=llm_fn), args.verbose)
+                _print_result(
+                    answer(
+                        db,
+                        question,
+                        classification_mode=classification_mode,
+                        llm_fn=llm_fn,
+                    ),
+                    args.verbose,
+                )
         return
 
     if not args.question:
         parser.error("question is required unless --repl is used")
 
     with connect() as db:
-        result = answer(db, args.question, llm_fn=llm_fn)
+        result = answer(
+            db, args.question, classification_mode=classification_mode, llm_fn=llm_fn
+        )
 
     _print_result(result, args.verbose)
 
