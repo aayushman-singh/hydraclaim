@@ -84,7 +84,9 @@ def _normalize_value(value: str, msg: dict, predicate: str = "deadline") -> str:
     If the value is already ISO-like, leave it. Otherwise look for month/day
     patterns and resolve them using the message year.
     """
-    value = str(value).strip()
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"invalid {predicate} value: {value!r}")
+    value = value.strip()
     if predicate not in _DATE_PREDICATES:
         return value
     if re.match(r"^\d{4}-\d{2}-\d{2}$", value):
@@ -106,17 +108,17 @@ def _normalize_value(value: str, msg: dict, predicate: str = "deadline") -> str:
         raise ValueError(f"invalid {predicate} value: {value!r}") from exc
 
 
-def _validate_supersedes(
-    raw: object, active_ids: set[str]
-) -> tuple[str | None, str | None]:
-    """Return (target_id, warning) tuple."""
+def _validate_supersedes(raw: object, active_ids: set[str]) -> str | None:
+    """Validate an explicit supersession target."""
     if raw is None or raw == "":
-        return None, None
+        return None
     if not isinstance(raw, str):
-        return None, f"supersedes must be a claim id string, got {type(raw).__name__}"
+        raise ValueError(
+            f"supersedes must be a claim id string, got {type(raw).__name__}"
+        )
     if raw not in active_ids:
-        return None, f"supersedes target {raw!r} is not an active claim, ignored"
-    return raw, None
+        raise ValueError(f"supersedes target {raw!r} is not an active claim")
+    return raw
 
 
 def build_messages(
@@ -193,45 +195,57 @@ def parse_claims(
     Invalid temporal input raises so extraction cannot continue with an
     incorrect date.
     """
-    if isinstance(response_json, dict):
-        raw_claims = response_json.get("claims", [])
-    elif isinstance(response_json, list):
-        raw_claims = response_json
-    else:
-        return [], [f"unexpected LLM response type: {type(response_json).__name__}"]
+    if not isinstance(response_json, dict) or set(response_json) != {"claims"}:
+        raise ValueError("malformed extraction root: expected object with claims")
+    raw_claims = response_json["claims"]
     if not isinstance(raw_claims, list):
-        return [], ["'claims' is not a list"]
+        raise ValueError("malformed extraction root: 'claims' must be a list")
 
     by_msg_id = {m["msg_id"]: m for m in session["messages"]}
     active_ids = {c["id"] for c in (active_claims or [])}
     drafts, warnings = [], []
+    required_fields = {
+        "subject",
+        "predicate",
+        "value",
+        "valid_from",
+        "quote",
+        "author",
+        "source_kind",
+        "session_id",
+        "msg_id",
+        "explicitness",
+        "confidence",
+        "supersedes",
+    }
     for i, raw in enumerate(raw_claims):
         where = f"claim[{i}] ({raw.get('predicate', '?') if isinstance(raw, dict) else '?'})"
         if not isinstance(raw, dict):
-            warnings.append(f"{where}: not an object, dropped")
-            continue
+            raise ValueError(f"{where}: claim must be an object")
+        unknown = sorted(set(raw) - required_fields)
+        if unknown:
+            raise ValueError(f"{where}: unsupported fields: {unknown}")
+        missing = sorted(required_fields - set(raw))
+        if missing:
+            raise ValueError(f"{where}: missing fields: {missing}")
         if raw.get("predicate") not in PREDICATES:
-            warnings.append(
-                f"{where}: unknown predicate {raw.get('predicate')!r}, dropped"
-            )
-            continue
+            raise ValueError(f"{where}: unknown predicate {raw.get('predicate')!r}")
         if raw.get("source_kind") not in SOURCE_KINDS:
-            warnings.append(
-                f"{where}: unknown source_kind {raw.get('source_kind')!r}, dropped"
-            )
-            continue
+            raise ValueError(f"{where}: unknown source_kind {raw.get('source_kind')!r}")
         msg = by_msg_id.get(raw.get("msg_id", ""))
         if msg is None:
-            warnings.append(
-                f"{where}: msg_id {raw.get('msg_id')!r} not in session, dropped"
-            )
-            continue
+            raise ValueError(f"{where}: msg_id {raw.get('msg_id')!r} not in session")
+        if raw["session_id"] != session["session_id"]:
+            raise ValueError(f"{where}: session_id does not match session")
+        if raw["source_kind"] != msg["source_kind"]:
+            raise ValueError(f"{where}: source_kind does not match message")
+        if not isinstance(raw["author"], str) or not raw["author"].strip():
+            raise ValueError(f"{where}: author must be a non-empty string")
+        if raw["author"] != msg["author"]:
+            raise ValueError(f"{where}: author does not match message")
         quote = raw.get("quote")
         if not isinstance(quote, str) or not quote or quote not in msg["text"]:
-            warnings.append(
-                f"{where}: quote not found verbatim in {msg['msg_id']}, dropped"
-            )
-            continue
+            raise ValueError(f"{where}: quote not found verbatim in {msg['msg_id']}")
         raw_valid_from = raw.get("valid_from")
         try:
             if not isinstance(raw_valid_from, str) or not re.fullmatch(
@@ -241,9 +255,8 @@ def parse_claims(
             valid_from = date.fromisoformat(raw_valid_from).isoformat()
         except (TypeError, ValueError) as exc:
             raise ValueError(f"invalid valid_from date: {raw_valid_from!r}") from exc
-        if not isinstance(raw.get("subject"), str) or not raw["subject"].strip():
-            warnings.append(f"{where}: missing subject, dropped")
-            continue
+        if not isinstance(raw["subject"], str) or not raw["subject"].strip():
+            raise ValueError(f"{where}: subject must be a non-empty string")
 
         try:
             explicitness = _score(raw.get("explicitness"), "explicitness")
@@ -251,10 +264,11 @@ def parse_claims(
         except ValueError as exc:
             raise ValueError(f"{where}: {exc}") from exc
 
-        value = _normalize_value(raw.get("value", ""), msg, raw["predicate"])
-        supersedes, warn = _validate_supersedes(raw.get("supersedes"), active_ids)
-        if warn:
-            warnings.append(f"{where}: {warn}")
+        try:
+            value = _normalize_value(raw["value"], msg, raw["predicate"])
+        except ValueError as exc:
+            raise ValueError(f"{where}: {exc}") from exc
+        supersedes = _validate_supersedes(raw["supersedes"], active_ids)
 
         drafts.append(
             {
@@ -263,7 +277,7 @@ def parse_claims(
                 "value": value,
                 "valid_from": valid_from,
                 "quote": quote,
-                "author": str(raw.get("author") or msg["author"]),
+                "author": raw["author"],
                 "source_kind": raw["source_kind"],
                 "session_id": session["session_id"],
                 "msg_id": msg["msg_id"],
@@ -318,10 +332,7 @@ def main(argv: Sequence[str] | None = None) -> int | None:
 
     from hydraclaim import config
 
-    try:
-        config.require_settings(llm=True)
-    except config.ConfigurationError as exc:
-        parser.error(str(exc))
+    config.require_settings(llm=True)
 
     doc = json.loads(Path(args.scenario).read_text(encoding="utf-8"))
     scen = doc["scenario_id"]

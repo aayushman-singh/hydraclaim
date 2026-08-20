@@ -30,13 +30,16 @@ def _strip_slack_formatting(text: str) -> str:
 
 
 def _author_name(msg: dict) -> str:
-    """Best-effort author name from a Slack message."""
+    """Return the author name from a Slack message."""
     profile = msg.get("user_profile", {})
     if isinstance(profile, dict):
         name = profile.get("real_name") or profile.get("display_name")
-        if name:
+        if isinstance(name, str) and name.strip():
             return name
-    return msg.get("user", "unknown")
+    user = msg.get("user")
+    if isinstance(user, str) and user.strip():
+        return user.strip()
+    raise ValueError("Slack message has no author")
 
 
 def _msg_timestamp(msg: dict) -> str:
@@ -64,11 +67,17 @@ def parse_slack_export(
     by_day: dict[str, list[dict]] = defaultdict(list)
 
     for msg in messages:
+        if not isinstance(msg, dict):
+            raise ValueError("Slack message must be an object")
         timestamp = _msg_timestamp(msg)
         if msg.get("subtype") in ("channel_join", "channel_leave", "bot_message"):
             continue
-        text = msg.get("text", "")
-        if not text or not text.strip():
+        text = msg.get("text")
+        if text is None:
+            continue
+        if not isinstance(text, str):
+            raise ValueError("Slack message text must be a string")
+        if not text.strip():
             continue
 
         dt = datetime.fromtimestamp(float(timestamp), tz=timezone.utc)

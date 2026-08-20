@@ -127,19 +127,19 @@ def _single(overrides):
     return {"claims": [claim]}
 
 
-def test_drops_out_of_vocab_predicate():
-    drafts, warnings = parse_claims(_single({"predicate": "celebrates"}), SESSION)
-    assert drafts == [] and len(warnings) == 1
+def test_rejects_out_of_vocab_predicate_without_dropping_claim():
+    with pytest.raises(ValueError, match="unknown predicate"):
+        parse_claims(_single({"predicate": "celebrates"}), SESSION)
 
 
-def test_drops_ungrounded_quote():
-    drafts, warnings = parse_claims(_single({"quote": "not in the message"}), SESSION)
-    assert drafts == [] and "quote" in warnings[0]
+def test_rejects_ungrounded_quote_without_dropping_claim():
+    with pytest.raises(ValueError, match="quote"):
+        parse_claims(_single({"quote": "not in the message"}), SESSION)
 
 
-def test_drops_unknown_msg_id():
-    drafts, warnings = parse_claims(_single({"msg_id": "s6-m999"}), SESSION)
-    assert drafts == [] and "msg_id" in warnings[0]
+def test_rejects_unknown_msg_id_without_dropping_claim():
+    with pytest.raises(ValueError, match="msg_id"):
+        parse_claims(_single({"msg_id": "s6-m999"}), SESSION)
 
 
 @pytest.mark.parametrize(
@@ -154,6 +154,39 @@ def test_rejects_invalid_scores_without_defaults(field, value):
 def test_empty_claims_list():
     drafts, warnings = parse_claims({"claims": []}, SESSION)
     assert drafts == [] and warnings == []
+
+
+@pytest.mark.parametrize("response", [None, [], {"claims": "not-a-list"}])
+def test_rejects_malformed_extraction_root(response):
+    with pytest.raises(ValueError, match="claims|root"):
+        parse_claims(response, SESSION)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda claim: claim.pop("value"),
+        lambda claim: claim.pop("author"),
+        lambda claim: claim.update(unexpected="value"),
+        lambda claim: claim.update(author=""),
+        lambda claim: claim.update(value=3),
+    ],
+)
+def test_rejects_missing_unknown_or_invalid_claim_fields(change):
+    response = _single({})
+    change(response["claims"][0])
+    with pytest.raises(ValueError, match="claim\[0\]"):
+        parse_claims(response, SESSION)
+
+
+def test_rejects_author_mismatch_instead_of_substituting_message_author():
+    with pytest.raises(ValueError, match="author"):
+        parse_claims(_single({"author": "Other person"}), SESSION)
+
+
+def test_rejects_unknown_supersession_target_instead_of_warning():
+    with pytest.raises(ValueError, match="supersedes target"):
+        parse_claims(_single({"supersedes": "missing"}), SESSION, ACTIVE)
 
 
 def test_update_active_drops_superseded():

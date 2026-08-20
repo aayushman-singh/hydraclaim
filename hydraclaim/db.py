@@ -9,6 +9,7 @@ with cells as typed envelopes such as `{"type": "vertex_id", "value": 2}`;
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import httpx
@@ -52,36 +53,51 @@ class HydraDB:
         )
 
     def query(self, cypher: str, consistency: str = "causal") -> list[dict[str, Any]]:
-        resp = self._client.post(
-            f"/v1/graphs/{self._graph_id}/query",
-            json={
-                "cell_id": self._cell_id,
-                "query": cypher,
-                "consistency": consistency,
-            },
+        endpoint = f"/v1/graphs/{self._graph_id}/query"
+        context = (
+            f"endpoint={endpoint} graph_id={self._graph_id!r} "
+            f"consistency={consistency!r} query_length={len(cypher)}"
         )
+        try:
+            resp = self._client.post(
+                endpoint,
+                json={
+                    "cell_id": self._cell_id,
+                    "query": cypher,
+                    "consistency": consistency,
+                },
+            )
+        except httpx.HTTPError as exc:
+            raise HydraDBError(f"HydraDB transport failure ({context})") from exc
         if resp.status_code != 200:
             raise HydraDBError(
-                f"query failed (HTTP {resp.status_code}): {resp.text[:500]}\n"
-                f"cypher: {cypher[:300]}"
+                f"HydraDB query failed HTTP {resp.status_code} ({context})"
             )
-        payload = resp.json()
+        try:
+            payload = resp.json()
+        except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
+            raise HydraDBError(f"HydraDB invalid JSON response ({context})") from exc
+
         if isinstance(payload, dict) and "columns" in payload and "rows" in payload:
-            # Query API shape: rows are positional arrays aligned with columns.
             columns = payload["columns"]
+            rows = payload["rows"]
+            if not isinstance(columns, list) or any(
+                not isinstance(column, str) for column in columns
+            ):
+                raise HydraDBError(f"HydraDB malformed response ({context})")
+            if not isinstance(rows, list) or any(
+                not isinstance(row, list) or len(row) != len(columns) for row in rows
+            ):
+                raise HydraDBError(f"HydraDB malformed response ({context})")
             return [
-                {col: unwrap(val) for col, val in zip(columns, row)}
-                for row in payload["rows"]
+                {column: unwrap(value) for column, value in zip(columns, row)}
+                for row in rows
             ]
-        rows = payload.get("rows", payload) if isinstance(payload, dict) else payload
-        if not isinstance(rows, list):
-            raise HydraDBError(f"unexpected response shape: {str(payload)[:500]}")
-        return [
-            {k: unwrap(v) for k, v in row.items()}
-            if isinstance(row, dict)
-            else unwrap(row)
-            for row in rows
-        ]
+
+        rows = payload.get("rows") if isinstance(payload, dict) else payload
+        if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+            raise HydraDBError(f"HydraDB malformed response ({context})")
+        return [{key: unwrap(value) for key, value in row.items()} for row in rows]
 
     def query_one(
         self, cypher: str, consistency: str = "causal"

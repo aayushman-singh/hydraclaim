@@ -38,6 +38,10 @@ def extract_json(text: str) -> Any:
     Tolerates markdown ```json fences and surrounding prose; raises LLMError
     when nothing parseable is present.
     """
+    if not isinstance(text, str):
+        raise LLMError(
+            f"LLM response content must be a string, got {type(text).__name__}"
+        )
     fence = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
     candidate = fence.group(1) if fence else text
     decoder = json.JSONDecoder()
@@ -47,7 +51,7 @@ def extract_json(text: str) -> Any:
             return value
         except json.JSONDecodeError:
             continue
-    raise LLMError(f"no parseable JSON in LLM response: {text[:200]!r}")
+    raise LLMError("no parseable JSON in LLM response")
 
 
 def chat(
@@ -58,7 +62,10 @@ def chat(
     max_tokens: int | None = None,
     timeout: float | None = None,
 ) -> str:
-    cfg = _config()
+    try:
+        cfg = _config()
+    except (TypeError, ValueError) as exc:
+        raise LLMError("LLM configuration is invalid") from exc
     if not cfg["api_key"]:
         raise LLMError("LLM_API_KEY is not set — export it before running extraction")
     payload: dict[str, Any] = {
@@ -75,20 +82,42 @@ def chat(
     url = f"{cfg['base_url'].rstrip('/')}/chat/completions"
     request_timeout = timeout or cfg["timeout"]
 
+    context = (
+        f"endpoint={url!r} model={payload['model']!r} message_count={len(messages)}"
+    )
     try:
         with httpx.Client(timeout=request_timeout) as client:
             resp = client.post(url, json=payload, headers=headers)
         if resp.status_code >= 500:
-            raise LLMError(
-                f"LLM server error (HTTP {resp.status_code}): {resp.text[:300]}"
-            )
+            raise LLMError(f"LLM server error HTTP {resp.status_code} ({context})")
         if resp.status_code != 200:
+            raise LLMError(f"LLM request failed HTTP {resp.status_code} ({context})")
+        try:
+            response_json = resp.json()
+        except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
+            raise LLMError(f"LLM invalid JSON response ({context})") from exc
+        if not isinstance(response_json, dict):
             raise LLMError(
-                f"LLM request failed (HTTP {resp.status_code}): {resp.text[:300]}"
+                f"LLM malformed response: root must be an object ({context})"
             )
-        return resp.json()["choices"][0]["message"]["content"]
+        choices = response_json.get("choices")
+        if not isinstance(choices, list) or not choices:
+            raise LLMError(
+                f"LLM malformed response: choices must be non-empty ({context})"
+            )
+        first = choices[0]
+        if not isinstance(first, dict) or not isinstance(first.get("message"), dict):
+            raise LLMError(f"LLM malformed response: message is missing ({context})")
+        content = first["message"].get("content")
+        if not isinstance(content, str):
+            raise LLMError(
+                f"LLM malformed response: content is not a string ({context})"
+            )
+        return content
     except httpx.HTTPError as exc:
-        raise LLMError(f"LLM network error: {exc}") from exc
+        raise LLMError(f"LLM transport failure ({context})") from exc
+    except (TypeError, UnicodeDecodeError, ValueError) as exc:
+        raise LLMError(f"LLM request configuration is invalid ({context})") from exc
 
 
 def chat_json(messages: list[dict], **kwargs: Any) -> Any:

@@ -32,8 +32,13 @@ RETURN c.key AS id, e.name AS subject, c.predicate AS predicate,
        c.value AS value, c.valid_from AS valid_from,
        s.kind AS source_kind, s.author AS author""")
     for row in rows:
-        row["source_kind"] = row.get("source_kind") or "unknown"
-        row["author"] = row.get("author") or "unknown"
+        if (
+            not isinstance(row.get("source_kind"), str)
+            or not row["source_kind"].strip()
+        ):
+            raise ValueError("active Claim has no valid source_kind")
+        if not isinstance(row.get("author"), str) or not row["author"].strip():
+            raise ValueError("active Claim has no valid author")
     return rows
 
 
@@ -132,10 +137,7 @@ def main(argv: Sequence[str] | None = None) -> int | None:
 
     from hydraclaim import config
 
-    try:
-        config.require_settings(hydradb=True, llm=True)
-    except config.ConfigurationError as exc:
-        parser.error(str(exc))
+    config.require_settings(hydradb=True, llm=True)
 
     from hydraclaim.config import connect
 

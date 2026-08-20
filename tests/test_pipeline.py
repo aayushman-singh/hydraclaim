@@ -1,0 +1,78 @@
+from __future__ import annotations
+
+import pytest
+
+from hydraclaim import pipeline
+from hydraclaim.extract import parse_claims
+
+
+class _RecordingDB:
+    def __init__(self) -> None:
+        self.reads: list[str] = []
+        self.writes: list[str] = []
+
+    def query(self, cypher: str, consistency: str = "causal") -> list[dict]:
+        self.reads.append(cypher)
+        if cypher.lstrip().startswith(("CREATE", "SET")):
+            self.writes.append(cypher)
+        return []
+
+
+def _document() -> dict:
+    return {
+        "scenario_id": "strict-extraction",
+        "entities": [],
+        "sessions": [
+            {
+                "session_id": "s1",
+                "messages": [
+                    {
+                        "msg_id": "s1-m1",
+                        "ts": "2026-08-01T00:00:00+00:00",
+                        "author": "Asha Rao",
+                        "source_kind": "slack",
+                        "channel": "general",
+                        "text": "The project is active.",
+                    }
+                ],
+            }
+        ],
+    }
+
+
+def _valid_claim() -> dict:
+    return {
+        "subject": "project",
+        "predicate": "status",
+        "value": "active",
+        "valid_from": "2026-08-01",
+        "quote": "The project is active.",
+        "author": "Asha Rao",
+        "source_kind": "slack",
+        "session_id": "s1",
+        "msg_id": "s1-m1",
+        "explicitness": 1.0,
+        "confidence": 1.0,
+        "supersedes": None,
+    }
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {"wrong": []},
+        {"claims": [_valid_claim() | {"unknown": True}]},
+        {"claims": [_valid_claim() | {"value": 7}]},
+    ],
+)
+def test_malformed_extraction_stops_pipeline_before_any_write(monkeypatch, response):
+    db = _RecordingDB()
+
+    def strict_extract(session, entities, active):
+        return parse_claims(response, session, active)
+
+    monkeypatch.setattr(pipeline, "extract_session", strict_extract)
+    with pytest.raises(ValueError):
+        pipeline.run_pipeline(db, _document())
+
+    assert db.writes == []
