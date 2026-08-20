@@ -704,6 +704,9 @@ class GraphWriter:
         plan: dict,
         scenario_id: str,
         entities: list[dict] | None = None,
+        *,
+        extraction_key: str | None = None,
+        source_event_keys: dict[str, str] | None = None,
     ) -> dict:
         errors = _validate_plan(plan, scenario_id, entities)
         if errors:
@@ -757,6 +760,21 @@ class GraphWriter:
                 entity_endpoint[subject] = endpoint
             if _write_claim(self._db, claim_id, draft, endpoint, recorded_at):
                 stats["created"] += 1
+            if extraction_key:
+                self._db.query(
+                    f"CREATE (claim:Claim {{id: {graph_id(claim_id)}}})"
+                    f"-[:PRODUCED_BY]->(extraction:Extraction "
+                    f"{{id: {graph_id(extraction_key)}}})"
+                )
+            source_event_key = (source_event_keys or {}).get(
+                str(draft.get("msg_id", ""))
+            )
+            if source_event_key:
+                self._db.query(
+                    f"CREATE (evidence:Evidence {{id: {evidence_props(draft, claim_id)['id']}}})"
+                    f"-[:QUOTED_FROM]->(event:SourceEvent "
+                    f"{{id: {graph_id(source_event_key)}}})"
+                )
             entity_endpoint[subject] = (
                 f"{{id: {graph_id(entity_key(scenario_id, subject))}}}"
             )

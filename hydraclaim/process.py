@@ -53,7 +53,13 @@ def process_event(db, event_key: str, *, reprocess: bool = False) -> dict:
         store.fail_extraction(extraction_key, "RECONCILE", exc)
         raise
     try:
-        GraphWriter(db).apply_plan(plan, event_key, [])
+        GraphWriter(db).apply_plan(
+            plan,
+            event_key,
+            [],
+            extraction_key=extraction_key,
+            source_event_keys={event_key: event_key},
+        )
     except Exception as exc:
         store.fail_extraction(extraction_key, "WRITE", exc)
         raise
