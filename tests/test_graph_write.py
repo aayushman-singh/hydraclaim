@@ -486,10 +486,7 @@ def _contradiction_plan(edges):
     return {
         "create": [],
         "supersede": [],
-        "contradict": [
-            {"a_id": a_id, "b_id": b_id}
-            for a_id, b_id in edges
-        ],
+        "contradict": [{"a_id": a_id, "b_id": b_id} for a_id, b_id in edges],
         "duplicates": 0,
         "warnings": [],
     }
@@ -531,9 +528,7 @@ def test_apply_plan_rejects_self_contradiction_before_writes():
     ],
     ids=("cross-subject", "cross-predicate"),
 )
-def test_apply_plan_rejects_cross_slot_contradiction_before_writes(
-    a_scope, b_scope
-):
+def test_apply_plan_rejects_cross_slot_contradiction_before_writes(a_scope, b_scope):
     db = IntegrityDB(
         claims={
             "a": {"id": graph_id("a"), "subject": a_scope[0], "predicate": a_scope[1]},

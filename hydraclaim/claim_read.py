@@ -422,9 +422,7 @@ LIMIT {int(scope.limit) + 1}"""
                             limit=scope.limit,
                         )
                 if older_id not in scheduled_ids:
-                    pending.append(
-                        (older_id, current_depth + 1, path | {older_id})
-                    )
+                    pending.append((older_id, current_depth + 1, path | {older_id}))
                     scheduled_ids.add(older_id)
         return tuple(
             sorted(

@@ -618,9 +618,7 @@ class GraphWriter:
             for claim_id in [f"{scenario_id}:{claim['key']}"]
             for other in claim.get("contradicts_with", [])
         ]
-        _validate_contradiction_integrity(
-            self._db, contradict_edges, claim_metadata
-        )
+        _validate_contradiction_integrity(self._db, contradict_edges, claim_metadata)
 
         for claim in claims:
             claim_id = f"{scenario_id}:{claim['key']}"
@@ -674,9 +672,7 @@ class GraphWriter:
             for draft in plan["create"]
         }
         _validate_supersession_integrity(self._db, plan["supersede"], claim_metadata)
-        _validate_contradiction_integrity(
-            self._db, plan["contradict"], claim_metadata
-        )
+        _validate_contradiction_integrity(self._db, plan["contradict"], claim_metadata)
 
         recorded_at = datetime.now(timezone.utc).isoformat()
         stats = {
