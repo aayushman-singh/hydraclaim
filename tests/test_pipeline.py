@@ -71,17 +71,36 @@ def _valid_claim() -> dict:
         {"claims": [_valid_claim() | {"value": 7}]},
     ],
 )
-def test_malformed_extraction_stops_pipeline_before_any_write(monkeypatch, response):
+def test_malformed_extraction_preserves_capture_and_records_failure(
+    monkeypatch, response
+):
     db = _RecordingDB()
+    actions = []
+
+    class Store:
+        def __init__(self, _db):
+            pass
+
+        def capture(self, event):
+            actions.append(("capture", event["source_id"]))
+            return {"event_key": "event-1", "status": "CAPTURED", "created": True}
+
+        def start_extraction(self, *args, **kwargs):
+            actions.append(("start", args[0]))
+            return {"extraction_key": "extraction-1", "status": "RUNNING"}
+
+        def fail_extraction(self, _key, step, _exc):
+            actions.append(("fail", step))
 
     def strict_extract(session, entities, active):
         return parse_claims(response, session, active)
 
     monkeypatch.setattr(pipeline, "extract_session", strict_extract)
+    monkeypatch.setattr(pipeline, "SourceEventStore", Store)
     with pytest.raises(ValueError):
         pipeline.run_pipeline(db, _document())
 
-    assert db.writes == []
+    assert actions == [("capture", "s1-m1"), ("start", "event-1"), ("fail", "EXTRACT")]
 
 
 @pytest.mark.parametrize(
