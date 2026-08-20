@@ -44,6 +44,7 @@ class TestAliases:
 class TestClaimProps:
     def test_open_validity_window(self):
         claim = {
+            "subject": "payments",
             "predicate": "owner",
             "value": "Priya Shah",
             "valid_from": "2026-05-01",
@@ -57,6 +58,7 @@ class TestClaimProps:
         assert props["status"] == "active"
         assert props["id"] == graph_id("payments:c1")
         assert props["key"] == "payments:c1"
+        assert props["subject"] == "payments"
 
     def test_closed_window_preserved(self):
         claim = {

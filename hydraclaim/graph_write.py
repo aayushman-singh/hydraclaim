@@ -410,7 +410,8 @@ def _validate_relation_endpoints(
     """
     create_ids = {claim["id"] for claim in plan["create"]}
     references = (
-        [("SUPERSEDES", edge["new_id"]) for edge in plan["supersede"]]
+        [("CREATE", claim["id"]) for claim in plan["create"]]
+        + [("SUPERSEDES", edge["new_id"]) for edge in plan["supersede"]]
         + [("SUPERSEDES", edge["old_id"]) for edge in plan["supersede"]]
         + [("CONTRADICTS", edge["a_id"]) for edge in plan["contradict"]]
         + [("CONTRADICTS", edge["b_id"]) for edge in plan["contradict"]]
@@ -425,7 +426,7 @@ def _validate_relation_endpoints(
             exists = _node_exists(db, "Claim", claim_id)
             checked[claim_id] = exists
         if not exists:
-            if claim_id not in create_ids:
+            if relation != "CREATE" and claim_id not in create_ids:
                 missing.append(f"{relation} endpoint {claim_id!r}")
             continue
         stored_scope = _claim_metadata(db, claim_id)
@@ -445,17 +446,29 @@ def _validate_relation_endpoints(
 
 def _claim_metadata(db: Any, claim_id: str) -> tuple[str, str]:
     row = db.query_one(
+        f"MATCH (c:Claim {{id: {graph_id(claim_id)}}}) "
+        "RETURN c.subject AS subject, c.predicate AS predicate LIMIT 1"
+    )
+    if (
+        isinstance(row, dict)
+        and isinstance(row.get("subject"), str)
+        and row["subject"].strip()
+        and isinstance(row.get("predicate"), str)
+    ):
+        return row["subject"], row["predicate"]
+
+    # Claims written before subject became a Claim property still carry the
+    # authoritative subject on their ABOUT edge.
+    row = db.query_one(
         f"MATCH (c:Claim {{id: {graph_id(claim_id)}}})-[:ABOUT]->(e:Entity) "
-        "RETURN e.name AS subject, c.predicate AS predicate LIMIT 2"
+        "RETURN e.name AS subject, c.predicate AS predicate LIMIT 1"
     )
     if (
         not isinstance(row, dict)
         or not isinstance(row.get("subject"), str)
         or not isinstance(row.get("predicate"), str)
     ):
-        raise GraphIntegrityError(
-            f"cannot verify supersession scope for Claim {claim_id!r}"
-        )
+        raise GraphIntegrityError(f"cannot verify claim scope for Claim {claim_id!r}")
     return row["subject"], row["predicate"]
 
 

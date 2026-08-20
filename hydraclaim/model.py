@@ -53,6 +53,7 @@ def claim_props(claim: dict, cid: str, recorded_at: str) -> dict:
     return {
         "id": graph_id(cid),
         "key": cid,
+        "subject": claim.get("subject", ""),
         "predicate": claim["predicate"],
         "value": claim["value"],
         "valid_from": claim["valid_from"],

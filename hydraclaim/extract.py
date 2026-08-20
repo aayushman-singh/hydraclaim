@@ -26,6 +26,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 from hydraclaim.claims import PREDICATES, SOURCE_KINDS
+from hydraclaim.errors import ValidationError
 
 
 _MONTHS = {
@@ -325,6 +326,85 @@ def _update_active(active: list[dict], drafts: list[dict]) -> list[dict]:
     return kept
 
 
+def _required_string(value: object, path: str, errors: list[str]) -> None:
+    if not isinstance(value, str) or not value.strip():
+        errors.append(f"{path} must be a non-empty string")
+
+
+def validate_extraction_document(document: object) -> dict:
+    """Validate the session document before extraction accesses its fields."""
+    if not isinstance(document, dict):
+        raise ValidationError("invalid extraction document: root must be an object")
+
+    errors: list[str] = []
+    _required_string(document.get("scenario_id"), "scenario_id", errors)
+
+    entities = document.get("entities")
+    if not isinstance(entities, list):
+        errors.append("entities must be a list")
+    else:
+        for index, entity in enumerate(entities):
+            path = f"entities[{index}]"
+            if not isinstance(entity, dict):
+                errors.append(f"{path} must be an object")
+                continue
+            _required_string(entity.get("name"), f"{path}.name", errors)
+            if "type" in entity and not isinstance(entity["type"], str):
+                errors.append(f"{path}.type must be a string")
+            aliases = entity.get("aliases", [])
+            if not isinstance(aliases, list) or any(
+                not isinstance(alias, str) for alias in aliases
+            ):
+                errors.append(f"{path}.aliases must be a list of strings")
+
+    sessions = document.get("sessions")
+    if not isinstance(sessions, list):
+        errors.append("sessions must be a list")
+    else:
+        message_fields = (
+            "msg_id",
+            "ts",
+            "author",
+            "source_kind",
+            "channel",
+            "text",
+        )
+        for session_index, session in enumerate(sessions):
+            session_path = f"sessions[{session_index}]"
+            if not isinstance(session, dict):
+                errors.append(f"{session_path} must be an object")
+                continue
+            _required_string(
+                session.get("session_id"), f"{session_path}.session_id", errors
+            )
+            if "started_at" in session:
+                _required_string(
+                    session.get("started_at"), f"{session_path}.started_at", errors
+                )
+            messages = session.get("messages")
+            if not isinstance(messages, list):
+                errors.append(f"{session_path}.messages must be a list")
+                continue
+            for message_index, message in enumerate(messages):
+                message_path = f"{session_path}.messages[{message_index}]"
+                if not isinstance(message, dict):
+                    errors.append(f"{message_path} must be an object")
+                    continue
+                for field in message_fields:
+                    _required_string(
+                        message.get(field), f"{message_path}.{field}", errors
+                    )
+                if message.get("source_kind") not in SOURCE_KINDS:
+                    errors.append(
+                        f"{message_path}.source_kind is not supported: "
+                        f"{message.get('source_kind')!r}"
+                    )
+
+    if errors:
+        raise ValidationError("invalid extraction document: " + "; ".join(errors))
+    return document
+
+
 def main(argv: Sequence[str] | None = None) -> int | None:
     from hydraclaim.config import command_epilog
 
@@ -341,7 +421,9 @@ def main(argv: Sequence[str] | None = None) -> int | None:
 
     config.require_settings(llm=True)
 
-    doc = json.loads(Path(args.scenario).read_text(encoding="utf-8"))
+    doc = validate_extraction_document(
+        json.loads(Path(args.scenario).read_text(encoding="utf-8"))
+    )
     scen = doc["scenario_id"]
     active: list[dict] = []
     all_drafts: list[dict] = []

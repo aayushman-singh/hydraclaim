@@ -33,6 +33,7 @@ class IdempotentDB(RecordingDB):
         self.nodes = {
             label: set() for label in ("Claim", "Evidence", "Source", "Entity")
         }
+        self.claim_scopes = {}
         self.edges = set()
 
     def query(self, cypher):
@@ -41,6 +42,16 @@ class IdempotentDB(RecordingDB):
             r":(Claim|Evidence|Source|Entity) \{id: (\d+)", cypher
         ):
             self.nodes[label].add(int(node_id))
+        claim = re.search(
+            r":Claim \{id: (?P<id>\d+), key: '[^']*', subject: '(?P<subject>[^']*)', "
+            r"predicate: '(?P<predicate>[^']*)'",
+            cypher,
+        )
+        if claim:
+            self.claim_scopes[int(claim["id"])] = (
+                claim["subject"],
+                claim["predicate"],
+            )
         for label_a, id_a, relation, label_b, id_b in re.findall(
             r"\((?:\w+):(?P<label_a>\w+) \{id: (?P<id_a>\d+)[^}]*\}\)-\[:(?P<relation>\w+)\]->"
             r"\((?:\w+):(?P<label_b>\w+) \{id: (?P<id_b>\d+)[^}]*\}\)",
@@ -51,6 +62,14 @@ class IdempotentDB(RecordingDB):
 
     def query_one(self, cypher):
         self.queries.append(cypher)
+        if "RETURN c.subject AS subject" in cypher:
+            claim_id = int(cypher.split("id: ", 1)[1].split("}", 1)[0])
+            scope = self.claim_scopes.get(claim_id)
+            return (
+                {"subject": scope[0], "predicate": scope[1]}
+                if scope is not None
+                else None
+            )
         edge = re.search(
             r"\((?P<label_a>\w+):(?P<type_a>\w+) \{id: (?P<id_a>\d+)\}\)-\[:(?P<relation>\w+)\]->"
             r"\((?P<label_b>\w+):(?P<type_b>\w+) \{id: (?P<id_b>\d+)\}\)",
@@ -350,6 +369,26 @@ def test_ingest_rechecks_existing_claim_scope_for_relations(relation):
     assert db.writes == []
 
 
+def test_ingest_rejects_standalone_existing_claim_scope_before_any_write():
+    db = IntegrityDB(
+        claims={
+            "c1": {
+                "id": graph_id("scenario:c1"),
+                "subject": "project",
+                "predicate": "status",
+            }
+        }
+    )
+    scenario = _scenario()
+    scenario["ground_truth"]["claims"][0]["subject"] = "person"
+    scenario["entities"] = [{"name": "person", "type": "person", "aliases": []}]
+
+    with pytest.raises(GraphIntegrityError, match="existing Claim.*scope"):
+        GraphWriter(db).ingest_document(scenario)
+
+    assert db.writes == []
+
+
 def test_apply_plan_rejects_invalid_deadline_value_before_any_write():
     db = RecordingDB()
     plan = deepcopy(_plan())
@@ -413,6 +452,7 @@ class FailureAfterStepDB:
         self.evidence = set()
         self.sources = set()
         self.entities = set()
+        self.claim_scopes = {}
         self.edges = set()
 
     def _step(self):
@@ -423,6 +463,14 @@ class FailureAfterStepDB:
     def query_one(self, cypher):
         import re
 
+        if "RETURN c.subject AS subject" in cypher:
+            claim_id = int(cypher.split("id: ", 1)[1].split("}", 1)[0])
+            scope = self.claim_scopes.get(claim_id)
+            return (
+                {"subject": scope[0], "predicate": scope[1]}
+                if scope is not None
+                else None
+            )
         edge = re.search(
             r"\(a:(\w+) \{id: (\d+)\}\)-\[:(\w+)\]->\(b:(\w+) \{id: (\d+)\}\)",
             cypher,
@@ -450,6 +498,16 @@ class FailureAfterStepDB:
         import re
 
         self._step()
+        claim = re.search(
+            r":Claim \{id: (?P<id>\d+), key: '[^']*', subject: '(?P<subject>[^']*)', "
+            r"predicate: '(?P<predicate>[^']*)'",
+            cypher,
+        )
+        if claim:
+            self.claim_scopes[int(claim["id"])] = (
+                claim["subject"],
+                claim["predicate"],
+            )
         node = re.search(r"\(\w+:(\w+) \{id: (\d+)", cypher)
         if node:
             label, node_id = node.groups()
@@ -626,6 +684,25 @@ def test_apply_plan_rechecks_existing_create_endpoint_scope(relation):
         "duplicates": 0,
         "warnings": [],
     }
+
+    with pytest.raises(GraphIntegrityError, match="existing Claim.*scope"):
+        GraphWriter(db).apply_plan(plan, "scenario")
+
+    assert db.writes == []
+
+
+def test_apply_plan_rejects_standalone_existing_claim_scope_before_any_write():
+    db = IntegrityDB(
+        claims={
+            "c1": {
+                "id": graph_id("scenario:c1"),
+                "subject": "project",
+                "predicate": "status",
+            }
+        }
+    )
+    plan = _plan()
+    plan["create"][0]["subject"] = "person"
 
     with pytest.raises(GraphIntegrityError, match="existing Claim.*scope"):
         GraphWriter(db).apply_plan(plan, "scenario")

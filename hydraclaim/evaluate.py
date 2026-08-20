@@ -23,7 +23,100 @@ import json
 from collections.abc import Sequence
 from pathlib import Path
 
+from hydraclaim.errors import ValidationError
 from hydraclaim.reconcile import canonicalize_entity, normalize_value
+
+
+def _required_string(value: object, path: str, errors: list[str]) -> None:
+    if not isinstance(value, str) or not value.strip():
+        errors.append(f"{path} must be a non-empty string")
+
+
+def validate_evaluation_scenario(document: object) -> dict:
+    """Validate the scenario shape before evaluation accesses nested fields."""
+    if not isinstance(document, dict):
+        raise ValidationError("invalid evaluation scenario: root must be an object")
+
+    errors: list[str] = []
+    _required_string(document.get("scenario_id"), "scenario_id", errors)
+
+    entities = document.get("entities")
+    if not isinstance(entities, list):
+        errors.append("entities must be a list")
+    else:
+        for index, entity in enumerate(entities):
+            path = f"entities[{index}]"
+            if not isinstance(entity, dict):
+                errors.append(f"{path} must be an object")
+                continue
+            _required_string(entity.get("name"), f"{path}.name", errors)
+            aliases = entity.get("aliases", [])
+            if not isinstance(aliases, list) or any(
+                not isinstance(alias, str) for alias in aliases
+            ):
+                errors.append(f"{path}.aliases must be a list of strings")
+
+    ground_truth = document.get("ground_truth")
+    if not isinstance(ground_truth, dict):
+        errors.append("ground_truth must be an object")
+    else:
+        claims = ground_truth.get("claims")
+        if not isinstance(claims, list):
+            errors.append("ground_truth.claims must be a list")
+        else:
+            required_claim_fields = (
+                "key",
+                "subject",
+                "predicate",
+                "value",
+                "valid_from",
+            )
+            for index, claim in enumerate(claims):
+                path = f"ground_truth.claims[{index}]"
+                if not isinstance(claim, dict):
+                    errors.append(f"{path} must be an object")
+                    continue
+                for field in required_claim_fields:
+                    _required_string(claim.get(field), f"{path}.{field}", errors)
+                if "supersedes" in claim and claim["supersedes"] is not None:
+                    _required_string(claim["supersedes"], f"{path}.supersedes", errors)
+
+    if errors:
+        raise ValidationError("invalid evaluation scenario: " + "; ".join(errors))
+    return document
+
+
+def validate_drafts_document(document: object) -> dict:
+    """Validate the draft file shape before evaluation accesses its fields."""
+    if not isinstance(document, dict):
+        raise ValidationError("invalid evaluation drafts: root must be an object")
+
+    errors: list[str] = []
+    drafts = document.get("drafts")
+    if not isinstance(drafts, list):
+        errors.append("drafts must be a list")
+    else:
+        required_fields = ("id", "subject", "predicate", "value", "valid_from")
+        for index, draft in enumerate(drafts):
+            path = f"drafts[{index}]"
+            if not isinstance(draft, dict):
+                errors.append(f"{path} must be an object")
+                continue
+            for field in required_fields:
+                _required_string(draft.get(field), f"{path}.{field}", errors)
+            if "supersedes" in draft and draft["supersedes"] is not None:
+                _required_string(draft["supersedes"], f"{path}.supersedes", errors)
+
+    if errors:
+        raise ValidationError("invalid evaluation drafts: " + "; ".join(errors))
+    return document
+
+
+def _validate_draft_list(drafts: object) -> list[dict]:
+    if not isinstance(drafts, list):
+        raise ValidationError("invalid evaluation drafts: drafts must be a list")
+    validate_drafts_document({"drafts": drafts})
+    return drafts
 
 
 def load_ground_truth(scenario_doc: dict) -> list[dict]:
@@ -43,6 +136,8 @@ def load_ground_truth(scenario_doc: dict) -> list[dict]:
 def evaluate(
     drafts: list[dict], scenario_doc: dict, roster: list[dict] | None = None
 ) -> dict:
+    scenario_doc = validate_evaluation_scenario(scenario_doc)
+    drafts = _validate_draft_list(drafts)
     roster = roster if roster is not None else scenario_doc.get("entities", [])
     gold = load_ground_truth(scenario_doc)
 
@@ -139,8 +234,12 @@ def main(argv: Sequence[str] | None = None) -> int | None:
     parser.add_argument("drafts", help="drafts JSON from hydraclaim.extract --emit")
     args = parser.parse_args(argv)
 
-    doc = json.loads(Path(args.scenario).read_text(encoding="utf-8"))
-    drafts = json.loads(Path(args.drafts).read_text(encoding="utf-8"))["drafts"]
+    doc = validate_evaluation_scenario(
+        json.loads(Path(args.scenario).read_text(encoding="utf-8"))
+    )
+    drafts = validate_drafts_document(
+        json.loads(Path(args.drafts).read_text(encoding="utf-8"))
+    )["drafts"]
     report = evaluate(drafts, doc)
 
     print(f"scenario: {report['scenario']}")

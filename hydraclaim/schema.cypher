@@ -6,7 +6,7 @@
 // Node shapes
 // ---------------------------------------------------------------------------
 // (:Entity   {id, name, type, aliases})                      // people, projects, systems
-// (:Claim    {id, predicate, value,
+// (:Claim    {id, subject, predicate, value,
 //             valid_from, valid_to,                          // event time (bitemporal)
 //             recorded_at,                                   // ingestion time
 //             status,                                        // active | superseded | disputed
