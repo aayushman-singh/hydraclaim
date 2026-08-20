@@ -22,7 +22,7 @@ import argparse
 import json
 from pathlib import Path
 
-from hydraclaim.reconcile import _norm, canonicalize_entity
+from hydraclaim.reconcile import canonicalize_entity, normalize_value
 
 
 def load_ground_truth(scenario_doc: dict) -> list[dict]:
@@ -31,7 +31,7 @@ def load_ground_truth(scenario_doc: dict) -> list[dict]:
             "key": c["key"],
             "subject": c["subject"],
             "predicate": c["predicate"],
-            "value_norm": _norm(c["value"]),
+            "value_norm": normalize_value(c["value"]),
             "valid_from": c["valid_from"],
             "supersedes": c.get("supersedes"),
         }
@@ -50,9 +50,9 @@ def evaluate(drafts: list[dict], scenario_doc: dict, roster: list[dict] | None =
         subject = canonicalize_entity(draft["subject"], roster)
         triple_hit = [
             g for g in gold
-            if _norm(g["subject"]) == _norm(subject)
+            if normalize_value(g["subject"]) == normalize_value(subject)
             and g["predicate"] == draft["predicate"]
-            and g["value_norm"] == _norm(draft["value"])
+            and g["value_norm"] == normalize_value(draft["value"])
         ]
         unmatched = [g for g in triple_hit if g["key"] not in matched_gold]
         if unmatched:

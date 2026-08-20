@@ -17,7 +17,8 @@ from pathlib import Path
 
 from hydraclaim.db import HydraDB
 from hydraclaim.extract import extract_session
-from hydraclaim.reconcile import apply_plan, plan_writes
+from hydraclaim.graph_write import GraphWriter
+from hydraclaim.reconcile import plan_writes
 
 
 def fetch_active_claims(db: HydraDB) -> list[dict]:
@@ -37,34 +38,46 @@ RETURN c.key AS id, e.name AS subject, c.predicate AS predicate,
 
 def run_pipeline(db: HydraDB, doc: dict) -> dict:
     scen = doc["scenario_id"]
-    stats = {"scenario": scen, "sessions": [], "created": 0,
-             "superseded": 0, "contradicted": 0, "duplicates": 0}
+    stats = {
+        "scenario": scen,
+        "sessions": [],
+        "created": 0,
+        "superseded": 0,
+        "contradicted": 0,
+        "duplicates": 0,
+    }
+    writer = GraphWriter(db)
     for session in doc["sessions"]:
         active = fetch_active_claims(db)
         drafts, warnings = extract_session(session, doc["entities"], active)
         for warning in warnings:
             print(f"warn [{session['session_id']}]: {warning}", file=sys.stderr)
-        plan = plan_writes(drafts, active, doc["entities"],
-                           id_prefix=f"{scen}:{session['session_id']}")
+        plan = plan_writes(
+            drafts, active, doc["entities"], id_prefix=f"{scen}:{session['session_id']}"
+        )
         for warning in plan["warnings"]:
             print(f"warn [{session['session_id']}]: {warning}", file=sys.stderr)
-        applied = apply_plan(db, plan, scen, doc["entities"])
-        stats["sessions"].append({
-            "session": session["session_id"],
-            "drafts": len(drafts),
-            "created": applied["created"],
-            "superseded": applied["superseded"],
-            "contradicted": applied["contradicted"],
-            "duplicates": applied["duplicates"],
-        })
+        applied = writer.apply_plan(plan, scen, doc["entities"])
+        stats["sessions"].append(
+            {
+                "session": session["session_id"],
+                "drafts": len(drafts),
+                "created": applied["created"],
+                "superseded": applied["superseded"],
+                "contradicted": applied["contradicted"],
+                "duplicates": applied["duplicates"],
+            }
+        )
         stats["created"] += applied["created"]
         stats["superseded"] += applied["superseded"]
         stats["contradicted"] += applied["contradicted"]
         stats["duplicates"] += applied["duplicates"]
-        print(f"{session['session_id']}: {applied['created']} created, "
-              f"{applied['superseded']} superseded, "
-              f"{applied['contradicted']} contradicted, "
-              f"{applied['duplicates']} duplicate(s)")
+        print(
+            f"{session['session_id']}: {applied['created']} created, "
+            f"{applied['superseded']} superseded, "
+            f"{applied['contradicted']} contradicted, "
+            f"{applied['duplicates']} duplicate(s)"
+        )
     return stats
 
 

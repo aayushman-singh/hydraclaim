@@ -20,15 +20,15 @@ caller (`id` key) are honored; missing ids are assigned `{id_prefix}:x{N}`.
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
 
-from hydraclaim.cypher import to_cypher_literal as lit
-from hydraclaim.db import HydraDB
-from hydraclaim.model import entity_key, entity_props, graph_id
+from hydraclaim.graph_write import GraphWriter
 
 
-def _norm(value: object) -> str:
+def normalize_value(value: object) -> str:
     return re.sub(r"\s+", " ", str(value).strip().lower())
+
+
+_norm = normalize_value
 
 
 def canonicalize_entity(name: str, roster: list[dict]) -> str:
@@ -43,14 +43,17 @@ def canonicalize_entity(name: str, roster: list[dict]) -> str:
 
 def _same_fact(claim: dict, subject: str, predicate: str, value: str) -> bool:
     return (
-        _norm(claim["subject"]) == _norm(subject)
+        normalize_value(claim["subject"]) == normalize_value(subject)
         and claim["predicate"] == predicate
-        and _norm(claim["value"]) == _norm(value)
+        and normalize_value(claim["value"]) == normalize_value(value)
     )
 
 
 def _relates(claim: dict, subject: str, predicate: str) -> bool:
-    return _norm(claim["subject"]) == _norm(subject) and claim["predicate"] == predicate
+    return (
+        normalize_value(claim["subject"]) == normalize_value(subject)
+        and claim["predicate"] == predicate
+    )
 
 
 def plan_writes(
@@ -59,8 +62,10 @@ def plan_writes(
     roster: list[dict],
     id_prefix: str = "draft",
 ) -> dict:
-    active = [dict(c, status=c.get("status", "active"), valid_to=c.get("valid_to"))
-              for c in active_claims]
+    active = [
+        dict(c, status=c.get("status", "active"), valid_to=c.get("valid_to"))
+        for c in active_claims
+    ]
     by_id = {c["id"]: c for c in active}
 
     create: list[dict] = []
@@ -73,8 +78,13 @@ def plan_writes(
     for n, draft in enumerate(drafts, start=1):
         cid = draft.get("id") or f"{id_prefix}:x{n}"
         subject = canonicalize_entity(draft["subject"], roster)
-        enriched = {**draft, "id": cid, "subject": subject,
-                    "status": "active", "valid_to": None}
+        enriched = {
+            **draft,
+            "id": cid,
+            "subject": subject,
+            "status": "active",
+            "valid_to": None,
+        }
 
         # Rule 1: explicit supersession.
         if draft.get("supersedes"):
@@ -85,8 +95,9 @@ def plan_writes(
                     "claim; ingested as a plain new claim"
                 )
             else:
-                supersede.append({"new_id": cid, "old_id": target["id"],
-                                  "at": draft["valid_from"]})
+                supersede.append(
+                    {"new_id": cid, "old_id": target["id"], "at": draft["valid_from"]}
+                )
                 target["status"] = "superseded"
                 target["valid_to"] = draft["valid_from"]
                 create.append(enriched)
@@ -95,23 +106,31 @@ def plan_writes(
                 continue
 
         # Rule 2: exact duplicate.
-        if any(c["status"] == "active"
-               and _same_fact(c, subject, draft["predicate"], draft["value"])
-               for c in active):
+        if any(
+            c["status"] == "active"
+            and _same_fact(c, subject, draft["predicate"], draft["value"])
+            for c in active
+        ):
             duplicates += 1
             continue
 
         # Rules 3+4: same fact slot, different value.
         conflicts = [
-            c for c in active
+            c
+            for c in active
             if c["status"] == "active"
             and _relates(c, subject, draft["predicate"])
-            and _norm(c["value"]) != _norm(draft["value"])
+            and normalize_value(c["value"]) != normalize_value(draft["value"])
         ]
         for c in conflicts:
-            if c["source_kind"] == draft["source_kind"] and draft["valid_from"] >= c["valid_from"]:
+            if (
+                c["source_kind"] == draft["source_kind"]
+                and draft["valid_from"] >= c["valid_from"]
+            ):
                 # Rule 3: a source correcting itself.
-                supersede.append({"new_id": cid, "old_id": c["id"], "at": draft["valid_from"]})
+                supersede.append(
+                    {"new_id": cid, "old_id": c["id"], "at": draft["valid_from"]}
+                )
                 c["status"] = "superseded"
                 c["valid_to"] = draft["valid_from"]
             else:
@@ -134,62 +153,8 @@ def plan_writes(
     }
 
 
-def apply_plan(db: HydraDB, plan: dict, scenario_id: str,
-               entities: list[dict] | None = None) -> dict:
-    """Write a plan into HydraDB (claims, evidence, sources, edges, closures).
-
-    Uses the same verified-dialect write path as ingest.py: one-hop upsert
-    CREATEs, id-only endpoint references for existing nodes.
-
-    `entities` is the scenario roster; aliases are used when creating an
-    entity node for the first time.
-    """
-    from hydraclaim.ingest import _props, edge_exists, node_exists, write_claim
-
-    recorded_at = datetime.now(timezone.utc).isoformat()
-    stats = {"scenario": scenario_id, "created": 0, "entities_created": 0,
-             "superseded": len(plan["supersede"]), "contradicted": len(plan["contradict"]),
-             "duplicates": plan["duplicates"], "warnings": plan["warnings"]}
-    entity_lookup = {e["name"].strip(): e for e in (entities or [])}
-
-    for draft in plan["create"]:
-        cid = draft["id"]
-        ekey = entity_key(scenario_id, draft["subject"])
-        if node_exists(db, "Entity", ekey):
-            endpoint = f"{{id: {graph_id(ekey)}}}"
-        else:
-            rost = entity_lookup.get(draft["subject"].strip())
-            endpoint = _props(
-                entity_props(
-                    scenario_id,
-                    draft["subject"],
-                    draft.get("type", rost.get("type", "unknown") if rost else "unknown"),
-                    rost.get("aliases", []) if rost else [],
-                )
-            )
-            stats["entities_created"] += 1
-        write_claim(db, cid, draft, endpoint, recorded_at)
-        stats["created"] += 1
-
-    # Supersession edges + closure of the overwritten claims.
-    for edge in plan["supersede"]:
-        new_id, old_id = graph_id(edge["new_id"]), graph_id(edge["old_id"])
-        if not edge_exists(db, "Claim", new_id, "SUPERSEDES", "Claim", old_id):
-            db.query(
-                f"CREATE (new:Claim {{id: {new_id}}})"
-                f"-[:SUPERSEDES {{at: {lit(edge['at'])}}}]->(old:Claim {{id: {old_id}}})"
-            )
-        db.query(
-            f"MATCH (old:Claim {{id: {old_id}}}) "
-            f"SET old.valid_to = {lit(edge['at'])}, old.status = 'superseded'"
-        )
-
-    for edge in plan["contradict"]:
-        a_id, b_id = graph_id(edge["a_id"]), graph_id(edge["b_id"])
-        if not edge_exists(db, "Claim", a_id, "CONTRADICTS", "Claim", b_id):
-            db.query(
-                f"CREATE (a:Claim {{id: {a_id}}})"
-                f"-[:CONTRADICTS {{resolved: false, detected_at: {lit(recorded_at)}}}]"
-                f"->(b:Claim {{id: {b_id}}})"
-            )
-    return stats
+def apply_plan(
+    db, plan: dict, scenario_id: str, entities: list[dict] | None = None
+) -> dict:
+    """Apply a write plan through the central graph writer."""
+    return GraphWriter(db).apply_plan(plan, scenario_id, entities)
