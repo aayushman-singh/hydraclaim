@@ -7,6 +7,7 @@ import json
 import pytest
 
 from hydraclaim import retrieve, serve
+from hydraclaim.claim_read import ClaimReadLimitError
 from hydraclaim.llm import LLMError
 
 
@@ -163,6 +164,57 @@ def test_dispatch_maps_classifier_shape_failure(monkeypatch, caplog):
     assert "Traceback" in caplog.text
 
 
+def test_dispatch_maps_claim_limit_for_ask_and_logs_safe_context(monkeypatch, caplog):
+    def broken(*args, **kwargs):
+        raise ClaimReadLimitError(
+            "claim scope limit exceeded", subject="payments", limit=3
+        )
+
+    monkeypatch.setattr(serve, "handle_ask", broken)
+    with caplog.at_level("ERROR", logger="hydraclaim.serve"):
+        status, payload, _ = serve.dispatch(
+            "POST",
+            "/ask",
+            {"question": "What is the private source text?"},
+            FakeDB(),
+            None,
+        )
+
+    assert status == 409
+    assert payload == {
+        "code": "claim_limit_exceeded",
+        "error": "claim read limit exceeded",
+    }
+    assert "endpoint=/ask" in caplog.text
+    assert "question_length=32" in caplog.text
+    assert "limit=3" in caplog.text
+    assert "exception_type=ClaimReadLimitError" in caplog.text
+    assert "Traceback" in caplog.text
+    assert "private source text" not in caplog.text
+
+
+def test_dispatch_maps_claim_limit_for_graph_and_logs_subject(monkeypatch, caplog):
+    def broken(*args, **kwargs):
+        raise ClaimReadLimitError(
+            "claim scope limit exceeded", subject="product launch", limit=2
+        )
+
+    monkeypatch.setattr(serve, "handle_graph", broken)
+    with caplog.at_level("ERROR", logger="hydraclaim.serve"):
+        status, payload, _ = serve.dispatch("GET", "/graph", {}, FakeDB(), None)
+
+    assert status == 409
+    assert payload == {
+        "code": "claim_limit_exceeded",
+        "error": "claim read limit exceeded",
+    }
+    assert "endpoint=/graph" in caplog.text
+    assert "subject='product launch'" in caplog.text
+    assert "limit=2" in caplog.text
+    assert "exception_type=ClaimReadLimitError" in caplog.text
+    assert "Traceback" in caplog.text
+
+
 @pytest.mark.parametrize("classifier_response", [[], None])
 def test_dispatch_maps_array_or_null_classifier_response(
     classifier_response, caplog, monkeypatch
@@ -305,6 +357,10 @@ def test_handle_graph_shapes_nodes_and_edges():
         {
             "MATCH (e:Entity)": [
                 {"id": 1, "name": "product launch", "type": "project"}
+            ],
+            "[:ABOUT]->(e:Entity {name:": [
+                {"id": 10, "subject": "product launch", "predicate": "deadline"},
+                {"id": 11, "subject": "product launch", "predicate": "deadline"},
             ],
             "[:ABOUT]->(e:Entity)": [
                 {

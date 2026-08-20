@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from hydraclaim import retrieve
-from hydraclaim.claim_read import ClaimReader, ClaimScope
+from hydraclaim.claim_read import ClaimReadLimitError, ClaimReader, ClaimScope
 from hydraclaim.db import HydraDBError
 from hydraclaim.llm import LLMError
 from hydraclaim.ratelimit import limiter
@@ -47,20 +47,51 @@ class SuggestionResponseError(ValueError):
     """Raised when the suggestion LLM returns an invalid JSON shape."""
 
 
-def _request_context(method: str, path: str, body: object, mode: str) -> str:
+def _request_context(
+    method: str,
+    path: str,
+    body: object,
+    mode: str,
+    *,
+    subject: str | None = None,
+    limit: int | None = None,
+) -> str:
     """Return safe request context for remote-failure logs."""
     fields = sorted(body) if isinstance(body, dict) else []
     question = body.get("question") if isinstance(body, dict) else None
     question_length = len(question) if isinstance(question, str) else None
-    return (
+    context = (
         f"method={method} endpoint={path} mode={mode} body_type={type(body).__name__} "
         f"fields={fields!r} question_length={question_length}"
     )
+    if subject is not None:
+        context += f" subject={subject!r}"
+    if limit is not None:
+        context += f" limit={limit}"
+    return context
 
 
 def _log_remote_failure(kind: str, context: str, exc: Exception) -> None:
     logger.exception(
         "%s failed %s exception_type=%s", kind, context, type(exc).__name__
+    )
+
+
+def _log_claim_limit_failure(
+    method: str, path: str, body: object, mode: str, exc: ClaimReadLimitError
+) -> None:
+    limit = exc.limit if isinstance(exc.limit, int) else ClaimScope().limit
+    _log_remote_failure(
+        "claim read limit",
+        _request_context(
+            method,
+            path,
+            body,
+            mode,
+            subject=exc.subject,
+            limit=limit,
+        ),
+        exc,
     )
 
 
@@ -387,6 +418,13 @@ def dispatch(
             return blocked
         try:
             return 200, handle_ask(question, db, llm_fn, classification_mode), None
+        except ClaimReadLimitError as exc:
+            _log_claim_limit_failure(method, path, body, classification_mode, exc)
+            return (
+                409,
+                _error("claim_limit_exceeded", "claim read limit exceeded"),
+                None,
+            )
         except LLMError as exc:
             _log_remote_failure(
                 "ask LLM",
@@ -415,6 +453,13 @@ def dispatch(
     if method == "GET" and path == "/graph":
         try:
             return 200, handle_graph(db), None
+        except ClaimReadLimitError as exc:
+            _log_claim_limit_failure(method, path, body, classification_mode, exc)
+            return (
+                409,
+                _error("claim_limit_exceeded", "claim read limit exceeded"),
+                None,
+            )
         except HydraDBError as exc:
             _log_remote_failure(
                 "graph backend",

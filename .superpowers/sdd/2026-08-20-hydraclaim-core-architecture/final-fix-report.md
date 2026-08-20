@@ -12,11 +12,12 @@ Files: `hydraclaim/claim_read.py`, `hydraclaim/schema.py`,
 `tests/test_retrieve.py`, and `tests/test_schema.py`.
 
 - Relation reads use one property-scoped source claim per query.
-- Relation reads contain no `IN` list, comma pattern, or multiple `MATCH` clause.
-- Subject and predicate scope stays in the query. The target claim identifier is
-  checked against the selected endpoint set before the row is returned.
-- Chain reads use one bounded variable-length path with a property-scoped start
-  claim.
+- Relation and chain reads contain no `IN` list, comma pattern, or multiple
+  `MATCH` clause.
+- Relation reads use one-edge queries. Each source and target claim passes a
+  bounded one-hop `ABOUT` check for the selected subject and predicate.
+- Chain reads use one bounded variable-length path. The starting claim and
+  each older claim pass a bounded one-hop `ABOUT` check.
 - Claim reads issue `LIMIT limit + 1` and raise `ClaimReadLimitError` when more
   rows exist. They do not silently truncate.
 - The schema battery includes the exact selected-relation query shapes and tests
@@ -32,6 +33,10 @@ Files: `hydraclaim/router.py`, `hydraclaim/serve.py`, and `tests/test_serve.py`.
 - Array and null request or classifier response shapes have focused tests.
 - Remote failures use `logger.exception` with endpoint, mode, body type, field
   names, question length, exception type, and traceback context.
+- Claim-read limit failures from `/ask` and `/graph` return HTTP 409 with
+  `claim_limit_exceeded`. Logs include the endpoint, subject or question
+  length, limit, exception type, and full traceback. Logs do not include source
+  text.
 - Heuristic and LLM suggestion modes are explicit. LLM suggestion errors do not
   select the heuristic result.
 - No new broad exception or `BaseException` handler hides programming errors.
@@ -58,34 +63,43 @@ variables, and Ruff formatting changes. Demo behavior is not refactored.
 
 | Command | Result |
 | --- | --- |
-| `python -m pytest -q` | **214 passed** in 1.37 s |
+| `python -m pytest -q` | **221 passed** in 1.10 s |
 | `ruff check --fix .` | **All checks passed** |
-| `ruff format .` | **51 files left unchanged** |
-| `ruff format --check .` | **51 files already formatted** |
+| `ruff format .` | **4 files reformatted; 48 files left unchanged** |
+| `ruff format --check .` | **52 files already formatted** |
 | `git diff --check` | No whitespace errors |
 
-Focused runs also passed: claim reads, retrieval, and schema tests (27); graph
-preflight tests (21); serve tests (23); router and serve tests (38); and
-extraction tests (15).
+Focused runs also passed: claim-read and serve tests (36); retrieval tests
+(12); and schema tests (6).
 
 ## Live HydraDB evidence
 
-Readiness was checked before the query rewrite:
+The required startup command completed successfully:
 
-- `docker compose ps` showed no running HydraDB container.
-- `http://127.0.0.1:9090/readyz` refused the connection.
-- `http://127.0.0.1:8443` refused the connection.
+```text
+bash scripts/dev-up.sh
+created hydradb-data/auth-token (development token only)
+Container hydraclaim-release-hydradb-1 Started
+waiting for HydraDB readiness — ready
+HTTP query API: http://127.0.0.1:8443
+```
 
-The required live command was run:
+The required live command also completed successfully:
 
 ```text
 python -m hydraclaim.schema --verify
+probe run id: 5398d2ac
+PASS  one-hop CREATE + read back  (1 row(s) back)
+PASS  property-scoped selected relation reads  (1 row(s) back)
+PASS  upsert by integer id (re-CREATE is idempotent)  (1 row(s) back)
+PASS  string equality in WHERE over an edge pattern  (2 row(s) back)
+PASS  bounded variable-length path (SUPERSEDES*1..5 shape)  (2 row(s) back)
+PASS  OPTIONAL MATCH  (1 row(s) back)
+PASS  aggregation count(*) over an edge pattern  (1 row(s) back)
+PASS  SET update  (1 row(s) back)
+PASS  label/property-scoped DETACH DELETE (reset pattern)  (0 row(s) back)
+cleanup: probe nodes deleted
 ```
-
-It exited with status 1. The first query raised
-`httpx.ConnectError: [WinError 10061] No connection could be made because the
-target machine actively refused it`. No schema query form is claimed as live
-verified in this worktree.
 
 ## Commits
 
@@ -95,9 +109,9 @@ verified in this worktree.
 - `d516ef0` — `chore: clean reported Ruff and format findings`
 - `ccc3cf8` — `fix: validate deadline claim values`
 - `a562797` — `test: cover malformed classifier and suggestion responses`
+- Task 7 atomic commit — claim scope and HTTP limit correctness.
 
 ## Concerns
 
-Live HydraDB verification remains blocked by the unavailable local service.
-Run `python -m hydraclaim.schema --verify` again against a reachable HydraDB
-before release and record the PASS/FAIL result for each selected relation form.
+The local HydraDB container remains running after verification. Stop it with
+`docker compose down` when it is no longer needed.

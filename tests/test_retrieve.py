@@ -191,6 +191,21 @@ class _FakeDB:
     def query(self, cypher, consistency="causal"):
         if "MATCH (e:Entity)" in cypher:
             return list(self._entities)
+        if "RETURN c.id AS id, e.name AS subject, c.predicate AS predicate" in cypher:
+            match = re.search(r"c:Claim \{id: (\d+)\}", cypher)
+            claim_id = int(match.group(1)) if match else None
+            row = next(
+                (claim for claim in self._claims if claim["id"] == claim_id), None
+            )
+            if row is None:
+                return []
+            return [
+                {
+                    "id": row["id"],
+                    "subject": row["subject"],
+                    "predicate": row["predicate"],
+                }
+            ]
         if "SUPERSEDES*1..5" in cypher:
             m = re.search(r"id:\s*(\d+)", cypher)
             start = int(m.group(1)) if m else None
@@ -210,6 +225,8 @@ class _FakeDB:
                                 "value": row["value"],
                                 "valid_from": row["valid_from"],
                                 "valid_to": row["valid_to"],
+                                "subject": row["subject"],
+                                "predicate": row["predicate"],
                             }
                         )
             return out

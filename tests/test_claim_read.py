@@ -18,6 +18,8 @@ class _FakeDB:
         self.queries.append(cypher)
         if "MATCH (e:Entity)" in cypher:
             return [{"name": "product launch", "aliases": "launch"}]
+        if "RETURN c.id AS id, e.name AS subject, c.predicate AS predicate" in cypher:
+            return [{"id": 1, "subject": "product launch", "predicate": "owned_by"}]
         if "c.key AS key" in cypher:
             return [
                 {
@@ -72,6 +74,19 @@ class _OrderingDB:
         self.queries.append(cypher)
         if "MATCH (e:Entity)" in cypher:
             return [{"name": "product launch", "aliases": "launch"}]
+        if "RETURN c.id AS id, e.name AS subject, c.predicate AS predicate" in cypher:
+            memberships = [
+                {"id": 10, "subject": "product launch", "predicate": "deadline"},
+                *[
+                    {
+                        "id": row["id"],
+                        "subject": row["subject"],
+                        "predicate": row["predicate"],
+                    }
+                    for row in self.chain
+                ],
+            ]
+            return [row for row in memberships if f"{{id: {row['id']}}}" in cypher]
         if "SUPERSEDES*1..5" in cypher:
             return list(self.chain)
         if "c.key AS key" in cypher:
@@ -87,6 +102,12 @@ class _RelationDB:
 
     def query(self, cypher: str, consistency: str = "causal") -> list[dict]:
         self.queries.append(cypher)
+        if "RETURN c.id AS id, e.name AS subject, c.predicate AS predicate" in cypher:
+            if "{id: 1}" in cypher:
+                return [{"id": 1, "subject": "product launch", "predicate": "deadline"}]
+            if "{id: 2}" in cypher:
+                return [{"id": 2, "subject": "product launch", "predicate": "deadline"}]
+            return []
         if "{id: 1}" not in cypher:
             return []
         return [
@@ -106,6 +127,55 @@ class _LimitDB:
         ]
 
 
+class _CrossScopeChainDB:
+    def __init__(self, start: dict | None = None) -> None:
+        self.queries: list[str] = []
+        self.start = start or {
+            "id": 10,
+            "subject": "product launch",
+            "predicate": "deadline",
+        }
+
+    def query(self, cypher: str, consistency: str = "causal") -> list[dict]:
+        self.queries.append(cypher)
+        if "SUPERSEDES*1..5" in cypher:
+            return [
+                {
+                    "id": 11,
+                    "value": "target old",
+                    "valid_from": "2026-08-01",
+                    "valid_to": "",
+                    "subject": "product launch",
+                    "predicate": "deadline",
+                },
+                {
+                    "id": 12,
+                    "value": "other subject",
+                    "valid_from": "2026-08-02",
+                    "valid_to": "",
+                    "subject": "other project",
+                    "predicate": "deadline",
+                },
+                {
+                    "id": 13,
+                    "value": "other predicate",
+                    "valid_from": "2026-08-03",
+                    "valid_to": "",
+                    "subject": "product launch",
+                    "predicate": "status",
+                },
+            ]
+        if "{id: 10}" in cypher:
+            return [self.start]
+        if "{id: 11}" in cypher:
+            return [{"id": 11, "subject": "product launch", "predicate": "deadline"}]
+        if "{id: 12}" in cypher:
+            return [{"id": 12, "subject": "other project", "predicate": "deadline"}]
+        if "{id: 13}" in cypher:
+            return [{"id": 13, "subject": "product launch", "predicate": "status"}]
+        return []
+
+
 def test_answer_returns_structured_abstention():
     result = ClaimReader(_FakeDB()).answer("Who owns unknown?", now=NOW)
 
@@ -122,9 +192,8 @@ def test_probe_queries_limit_relations_to_selected_claims():
         query for query in db.queries if "SUPERSEDES" in query or "CONTRADICTS" in query
     ]
     assert relation_queries
-    assert all(
-        "ABOUT" in query and "e:Entity {name:" in query for query in relation_queries
-    )
+    assert all("a:Claim {id:" in query for query in relation_queries)
+    assert any("ABOUT" in query and "e:Entity {name:" in query for query in db.queries)
 
 
 def test_claim_reads_order_equal_dates_by_claim_id():
@@ -231,8 +300,8 @@ def test_chain_scope_constrains_start_and_older_claims_and_orders_ties():
     assert [row["id"] for row in chain] == [2, 1]
     query = next(query for query in db.queries if "SUPERSEDES*1..5" in query)
     assert "c.id = 10" in query
-    assert "start_e.name" in query
-    assert "start_e.name" in query and "c.predicate" in query
+    assert "start_e.name" not in query
+    assert "c.predicate" in query
     assert "older.predicate" in query
     assert "ORDER BY older.valid_from DESC, older.id DESC" in query
     assert query.count("MATCH") == 1
@@ -252,8 +321,10 @@ def test_relation_reads_filter_unselected_endpoints():
     assert all(query.count("MATCH") == 1 for query in db.queries)
     assert all(" IN [" not in query for query in db.queries)
     assert all(", (" not in query for query in db.queries)
-    assert all("a:Claim {id:" in query for query in db.queries)
-    assert all("e:Entity {name:" in query for query in db.queries)
+    relation_queries = [query for query in db.queries if "SUPERSEDES" in query]
+    assert relation_queries
+    assert all("a:Claim {id:" in query for query in relation_queries)
+    assert all("ABOUT" not in query for query in relation_queries)
 
 
 def test_read_claims_fails_loudly_when_limit_is_exceeded():
@@ -261,3 +332,26 @@ def test_read_claims_fails_loudly_when_limit_is_exceeded():
         ClaimReader(_LimitDB()).read_claims(
             ClaimScope("product launch", "deadline", limit=2)
         )
+
+
+def test_chain_rejects_cross_subject_and_cross_predicate_adapter_rows():
+    db = _CrossScopeChainDB()
+
+    chain = ClaimReader(db).read_chain(10, ClaimScope("product launch", "deadline"))
+
+    assert [row["id"] for row in chain] == [11]
+    assert all(query.count("MATCH") == 1 for query in db.queries)
+    assert all(" IN [" not in query for query in db.queries)
+    assert all(", (" not in query for query in db.queries)
+    assert any("[:ABOUT]" in query and "{id: 11}" in query for query in db.queries)
+
+
+def test_chain_rejects_start_claim_outside_selected_scope():
+    db = _CrossScopeChainDB(
+        {"id": 10, "subject": "other project", "predicate": "deadline"}
+    )
+
+    chain = ClaimReader(db).read_chain(10, ClaimScope("product launch", "deadline"))
+
+    assert chain == ()
+    assert not any("SUPERSEDES*1..5" in query for query in db.queries)

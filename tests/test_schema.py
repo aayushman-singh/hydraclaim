@@ -44,7 +44,8 @@ def test_probe_covers_bounded_relation_read_forms():
     assert all(query.count("MATCH") == 1 for query in relation_queries)
     assert all(" IN [" not in query for query in relation_queries)
     assert all(", (" not in query for query in relation_queries)
-    assert all("{id:" in query and "{name:" in query for query in relation_queries)
+    assert all("{id:" in query for query in relation_queries)
+    assert any("ABOUT" in query and "{name:" in query for query in statements)
 
 
 class _CleanupFailureDB:

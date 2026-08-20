@@ -47,15 +47,21 @@ RETURN c.value, c.valid_from, c.valid_to;
 
 // 3. Supersession chain: chronology of one selected claim.
 //    HydraDB returns matching pairs. Compute chain depth client-side
-//    because the dialect has no path-length function.
-MATCH (e:Entity {name: 'product launch'})<-[:ABOUT]-(newer:Claim {id: 123})-[:SUPERSEDES*1..5]->(older:Claim)
+//    because the dialect has no path-length function. The caller checks the
+//    subject for the selected claim and each older claim with the one-hop
+//    ABOUT query below.
+MATCH (newer:Claim {id: 123})-[:SUPERSEDES*1..5]->(older:Claim)
 WHERE newer.predicate = 'deadline' AND older.predicate = 'deadline'
 RETURN newer.id AS newer_id, older.id AS older_id,
        newer.value AS newer_value, older.value AS older_value;
 
+MATCH (c:Claim {id: 123})-[:ABOUT]->(e:Entity {name: 'product launch'})
+WHERE c.predicate = 'deadline'
+RETURN c.id AS id, e.name AS subject, c.predicate AS predicate;
+
 // 4. Unresolved conflicts for one selected claim endpoint.
 //    CONTRADICTS is directed from the first claim to the second claim.
-MATCH (e:Entity {name: 'product launch'})<-[:ABOUT]-(a:Claim {id: 123})-[r:CONTRADICTS]->(b:Claim)
+MATCH (a:Claim {id: 123})-[r:CONTRADICTS]->(b:Claim)
 WHERE a.predicate = 'deadline' AND b.predicate = 'deadline' AND r.resolved = false
 RETURN a.predicate, a.value, b.value, a.valid_from, b.valid_from;
 

@@ -32,6 +32,19 @@ class ClaimScope:
 class ClaimReadLimitError(ValueError):
     """Raised when a bounded claim scope contains more matches than its limit."""
 
+    def __init__(
+        self,
+        message: str = "claim scope limit exceeded",
+        *,
+        subject: str | None = None,
+        predicate: str | None = None,
+        limit: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.subject = subject
+        self.predicate = predicate
+        self.limit = limit
+
 
 @dataclass(frozen=True)
 class ClaimView:
@@ -185,7 +198,10 @@ LIMIT {int(scope.limit) + 1}"""
             raise ClaimReadLimitError(
                 "claim scope limit exceeded for "
                 f"subject={scope.subject!r}, predicate={predicate!r}, "
-                f"limit={scope.limit}; more matches exist"
+                f"limit={scope.limit}; more matches exist",
+                subject=scope.subject,
+                predicate=scope.predicate,
+                limit=scope.limit,
             )
         return tuple(
             self._to_claim_view(row, scope, index) for index, row in enumerate(rows, 1)
@@ -225,22 +241,28 @@ LIMIT {int(scope.limit) + 1}"""
             relation_match = "-[r:CONTRADICTS]->"
         rows: list[dict] = []
         for claim_id in sorted(claim_ids):
+            if self._read_claim_scope_membership(claim_id, scope) is None:
+                continue
             predicate_clause = (
-                f"a.predicate = {lit(scope.predicate)} "
+                f"WHERE a.predicate = {lit(scope.predicate)} "
                 f"AND b.predicate = {lit(scope.predicate)}"
                 if scope.predicate
                 else ""
             )
-            where_clause = f"WHERE {predicate_clause}" if predicate_clause else ""
-            rows.extend(
-                self._db.query(
-                    f"""
-MATCH (e:Entity {{name: {lit(scope.subject)}}})<-[:ABOUT]-(a:Claim {{id: {int(claim_id)}}}){relation_match}(b:Claim)
-{where_clause}
+            for row in self._db.query(
+                f"""
+MATCH (a:Claim {{id: {int(claim_id)}}}){relation_match}(b:Claim)
+{predicate_clause}
 RETURN {return_fields}
 ORDER BY a.id ASC, b.id ASC"""
-                )
-            )
+            ):
+                target_key = "old_id" if relation_type == "SUPERSEDES" else "b_id"
+                target_id = int(row.get(target_key, row.get("dst")))
+                if target_id not in claim_ids:
+                    continue
+                if self._read_claim_scope_membership(target_id, scope) is None:
+                    continue
+                rows.append(row)
         if relation_type == "SUPERSEDES":
             rows = [
                 {
@@ -273,36 +295,74 @@ ORDER BY a.id ASC, b.id ASC"""
         return tuple(rows)
 
     def read_chain(self, claim_id: int, scope: ClaimScope) -> tuple[dict, ...]:
-        predicate_clause = (
-            f" AND older.predicate = {lit(scope.predicate)}" if scope.predicate else ""
-        )
+        start = self._read_claim_scope_membership(claim_id, scope)
+        if start is None:
+            return ()
+        start_predicate = start["predicate"]
+        predicate_clauses = [
+            f"c.id = {int(claim_id)}",
+            "c.predicate = older.predicate",
+        ]
+        if scope.predicate:
+            predicate_clauses.extend(
+                [
+                    f"c.predicate = {lit(scope.predicate)}",
+                    f"older.predicate = {lit(scope.predicate)}",
+                ]
+            )
         rows = self._db.query(
             f"""
-MATCH (start_e:Entity {{name: {lit(scope.subject)}}})<-[:ABOUT]-(c:Claim {{id: {int(claim_id)}}})-[:SUPERSEDES*1..5]->(older:Claim)
-WHERE c.id = {int(claim_id)}
-  AND c.predicate = older.predicate
-  {predicate_clause}
+MATCH (c:Claim {{id: {int(claim_id)}}})-[:SUPERSEDES*1..5]->(older:Claim)
+WHERE {" AND ".join(predicate_clauses)}
 RETURN older.id AS id, older.value AS value,
        older.valid_from AS valid_from, older.valid_to AS valid_to,
-       start_e.name AS subject, older.predicate AS predicate
+       older.predicate AS predicate
 ORDER BY older.valid_from DESC, older.id DESC"""
         )
-        rows = [
-            row
-            for row in rows
-            if row.get("subject", scope.subject) == scope.subject
-            and (
-                scope.predicate is None
-                or row.get("predicate", scope.predicate) == scope.predicate
+        scoped_rows = []
+        for row in rows:
+            if row["predicate"] != start_predicate:
+                continue
+            older_id = int(row["id"])
+            older = self._read_claim_scope_membership(older_id, scope)
+            if older is None or older["predicate"] != start_predicate:
+                continue
+            scoped_rows.append(
+                {
+                    **row,
+                    "subject": older["subject"],
+                    "predicate": older["predicate"],
+                }
             )
-        ]
         return tuple(
             sorted(
-                rows,
+                scoped_rows,
                 key=lambda row: (str(row["valid_from"]), int(row.get("id", 0))),
                 reverse=True,
             )
         )
+
+    def _read_claim_scope_membership(
+        self, claim_id: int, scope: ClaimScope
+    ) -> dict | None:
+        predicate_clause = (
+            f"WHERE c.predicate = {lit(scope.predicate)}" if scope.predicate else ""
+        )
+        rows = self._db.query(
+            f"""
+MATCH (c:Claim {{id: {int(claim_id)}}})-[:ABOUT]->(e:Entity {{name: {lit(scope.subject)}}})
+{predicate_clause}
+RETURN c.id AS id, e.name AS subject, c.predicate AS predicate"""
+        )
+        for row in rows:
+            if int(row["id"]) != int(claim_id):
+                continue
+            if row.get("subject") != scope.subject:
+                continue
+            if scope.predicate and row.get("predicate") != scope.predicate:
+                continue
+            return row
+        return None
 
     def probe(self, scope: ClaimScope) -> ProbeResult:
         claims = self.read_claims(
