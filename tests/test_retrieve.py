@@ -230,6 +230,36 @@ class _FakeDB:
                             }
                         )
             return out
+        if "-[:SUPERSEDES]->" in cypher and "RETURN older.id AS id" in cypher:
+            match = re.search(r"(?:current|a):Claim \{id: (\d+)\}", cypher)
+            source = int(match.group(1)) if match else None
+            return [
+                {
+                    "id": old_id,
+                    "value": next(
+                        claim["value"]
+                        for claim in self._claims
+                        if claim["id"] == old_id
+                    ),
+                    "valid_from": next(
+                        claim["valid_from"]
+                        for claim in self._claims
+                        if claim["id"] == old_id
+                    ),
+                    "valid_to": next(
+                        claim["valid_to"]
+                        for claim in self._claims
+                        if claim["id"] == old_id
+                    ),
+                    "predicate": next(
+                        claim["predicate"]
+                        for claim in self._claims
+                        if claim["id"] == old_id
+                    ),
+                }
+                for new_id, old_id in self._sup
+                if new_id == source
+            ]
         if "-[:SUPERSEDES]->" in cypher:
             match = re.search(r"a:Claim \{id: (\d+)\}", cypher)
             source = int(match.group(1)) if match else None

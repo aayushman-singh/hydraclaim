@@ -28,7 +28,12 @@ from pathlib import Path
 from typing import Any
 
 from hydraclaim import retrieve
-from hydraclaim.claim_read import ClaimReadLimitError, ClaimReader, ClaimScope
+from hydraclaim.claim_read import (
+    DEFAULT_CLAIM_READ_LIMIT,
+    ClaimReadLimitError,
+    ClaimReader,
+    ClaimScope,
+)
 from hydraclaim.db import HydraDBError
 from hydraclaim.llm import LLMError
 from hydraclaim.ratelimit import limiter
@@ -80,7 +85,11 @@ def _log_remote_failure(kind: str, context: str, exc: Exception) -> None:
 def _log_claim_limit_failure(
     method: str, path: str, body: object, mode: str, exc: ClaimReadLimitError
 ) -> None:
-    limit = exc.limit if isinstance(exc.limit, int) else ClaimScope().limit
+    limit = (
+        exc.limit
+        if isinstance(exc.limit, int) and not isinstance(exc.limit, bool)
+        else DEFAULT_CLAIM_READ_LIMIT
+    )
     _log_remote_failure(
         "claim read limit",
         _request_context(

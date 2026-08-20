@@ -87,6 +87,8 @@ class _OrderingDB:
                 ],
             ]
             return [row for row in memberships if f"{{id: {row['id']}}}" in cypher]
+        if "-[:SUPERSEDES]->" in cypher:
+            return list(self.chain) if "{id: 10}" in cypher else []
         if "SUPERSEDES*1..5" in cypher:
             return list(self.chain)
         if "c.key AS key" in cypher:
@@ -165,6 +167,32 @@ class _CrossScopeChainDB:
                     "predicate": "status",
                 },
             ]
+        if "-[:SUPERSEDES]->" in cypher:
+            if "{id: 10}" in cypher:
+                return [
+                    {
+                        "id": 11,
+                        "value": "target old",
+                        "valid_from": "2026-08-01",
+                        "valid_to": "",
+                        "predicate": "deadline",
+                    },
+                    {
+                        "id": 12,
+                        "value": "other subject",
+                        "valid_from": "2026-08-02",
+                        "valid_to": "",
+                        "predicate": "deadline",
+                    },
+                    {
+                        "id": 13,
+                        "value": "other predicate",
+                        "valid_from": "2026-08-03",
+                        "valid_to": "",
+                        "predicate": "status",
+                    },
+                ]
+            return []
         if "{id: 10}" in cypher:
             return [self.start]
         if "{id: 11}" in cypher:
@@ -174,6 +202,98 @@ class _CrossScopeChainDB:
         if "{id: 13}" in cypher:
             return [{"id": 13, "subject": "product launch", "predicate": "status"}]
         return []
+
+
+class _IterativeChainDB:
+    def __init__(self) -> None:
+        self.queries: list[str] = []
+
+    def query(self, cypher: str, consistency: str = "causal") -> list[dict]:
+        self.queries.append(cypher)
+        if "RETURN c.id AS id, e.name AS subject, c.predicate AS predicate" in cypher:
+            if "{id: 10}" in cypher:
+                return [
+                    {"id": 10, "subject": "product launch", "predicate": "deadline"}
+                ]
+            if "{id: 11}" in cypher:
+                return [{"id": 11, "subject": "other project", "predicate": "deadline"}]
+            if "{id: 12}" in cypher:
+                return [
+                    {"id": 12, "subject": "product launch", "predicate": "deadline"}
+                ]
+            return []
+        if "SUPERSEDES*1..5" in cypher:
+            return [
+                {
+                    "id": 11,
+                    "value": "middle",
+                    "valid_from": "2026-08-02",
+                    "valid_to": "",
+                    "predicate": "deadline",
+                },
+                {
+                    "id": 12,
+                    "value": "terminal",
+                    "valid_from": "2026-08-01",
+                    "valid_to": "",
+                    "predicate": "deadline",
+                },
+            ]
+        if "-[:SUPERSEDES]->" in cypher and "{id: 10}" in cypher:
+            return [
+                {
+                    "id": 11,
+                    "value": "middle",
+                    "valid_from": "2026-08-02",
+                    "valid_to": "",
+                    "predicate": "deadline",
+                }
+            ]
+        if "-[:SUPERSEDES]->" in cypher and "{id: 11}" in cypher:
+            return [
+                {
+                    "id": 12,
+                    "value": "terminal",
+                    "valid_from": "2026-08-01",
+                    "valid_to": "",
+                    "predicate": "deadline",
+                }
+            ]
+        return []
+
+
+class _CycleChainDB:
+    def __init__(self) -> None:
+        self.queries: list[str] = []
+
+    def query(self, cypher: str, consistency: str = "causal") -> list[dict]:
+        self.queries.append(cypher)
+        if "RETURN c.id AS id, e.name AS subject, c.predicate AS predicate" in cypher:
+            claim_id = 10 if "{id: 10}" in cypher else 11
+            return [
+                {"id": claim_id, "subject": "product launch", "predicate": "deadline"}
+            ]
+        if "-[:SUPERSEDES]->" not in cypher:
+            return []
+        if "{id: 10}" in cypher:
+            return [
+                {
+                    "id": 11,
+                    "value": "old",
+                    "valid_from": "2026-08-01",
+                    "valid_to": "",
+                    "predicate": "deadline",
+                }
+            ]
+        return [
+            {
+                "id": 10,
+                "value": "current",
+                "valid_from": "2026-08-02",
+                "valid_to": "",
+                "predicate": "deadline",
+            }
+        ]
 
 
 def test_answer_returns_structured_abstention():
@@ -298,15 +418,16 @@ def test_chain_scope_constrains_start_and_older_claims_and_orders_ties():
     chain = ClaimReader(db).read_chain(10, ClaimScope("product launch", "deadline"))
 
     assert [row["id"] for row in chain] == [2, 1]
-    query = next(query for query in db.queries if "SUPERSEDES*1..5" in query)
-    assert "c.id = 10" in query
+    query = next(query for query in db.queries if "-[:SUPERSEDES]->" in query)
+    assert "current:Claim {id: 10}" in query
     assert "start_e.name" not in query
-    assert "c.predicate" in query
+    assert "current.predicate" in query
     assert "older.predicate" in query
     assert "ORDER BY older.valid_from DESC, older.id DESC" in query
     assert query.count("MATCH") == 1
     assert " IN [" not in query
     assert ", (" not in query
+    assert "SUPERSEDES*" not in query
 
 
 def test_relation_reads_filter_unselected_endpoints():
@@ -344,6 +465,7 @@ def test_chain_rejects_cross_subject_and_cross_predicate_adapter_rows():
     assert all(" IN [" not in query for query in db.queries)
     assert all(", (" not in query for query in db.queries)
     assert any("[:ABOUT]" in query and "{id: 11}" in query for query in db.queries)
+    assert all("SUPERSEDES*" not in query for query in db.queries)
 
 
 def test_chain_rejects_start_claim_outside_selected_scope():
@@ -355,3 +477,24 @@ def test_chain_rejects_start_claim_outside_selected_scope():
 
     assert chain == ()
     assert not any("SUPERSEDES*1..5" in query for query in db.queries)
+
+
+def test_chain_stops_at_out_of_scope_intermediate_claim():
+    db = _IterativeChainDB()
+
+    chain = ClaimReader(db).read_chain(10, ClaimScope("product launch", "deadline"))
+
+    assert {row["id"] for row in chain}.isdisjoint({11, 12})
+    assert not any(
+        "-[:SUPERSEDES]->" in query and "{id: 11}" in query for query in db.queries
+    )
+    assert all("SUPERSEDES*" not in query for query in db.queries)
+
+
+def test_chain_is_cycle_safe():
+    db = _CycleChainDB()
+
+    chain = ClaimReader(db).read_chain(10, ClaimScope("product launch", "deadline"))
+
+    assert [row["id"] for row in chain] == [11]
+    assert len([query for query in db.queries if "-[:SUPERSEDES]->" in query]) == 2

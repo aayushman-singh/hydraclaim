@@ -45,12 +45,10 @@ WHERE c.predicate = 'deadline'
   AND (c.valid_to = '' OR c.valid_to > '2026-05-12')
 RETURN c.value, c.valid_from, c.valid_to;
 
-// 3. Supersession chain: chronology of one selected claim.
-//    HydraDB returns matching pairs. Compute chain depth client-side
-//    because the dialect has no path-length function. The caller checks the
-//    subject for the selected claim and each older claim with the one-hop
-//    ABOUT query below.
-MATCH (newer:Claim {id: 123})-[:SUPERSEDES*1..5]->(older:Claim)
+// 3. One supersession step for a selected claim.
+//    The caller repeats this bounded one-hop query up to five times. It checks
+//    the subject for each older claim with the one-hop ABOUT query below.
+MATCH (newer:Claim {id: 123})-[:SUPERSEDES]->(older:Claim)
 WHERE newer.predicate = 'deadline' AND older.predicate = 'deadline'
 RETURN newer.id AS newer_id, older.id AS older_id,
        newer.value AS newer_value, older.value AS older_value;

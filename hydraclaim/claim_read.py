@@ -20,13 +20,17 @@ if TYPE_CHECKING:
     from hydraclaim.router import Classification
 
 
+DEFAULT_CLAIM_READ_LIMIT = 25
+MAX_CHAIN_DEPTH = 5
+
+
 @dataclass(frozen=True)
 class ClaimScope:
     subject: str
     predicate: str | None = None
     active_only: bool = False
     as_of: str | None = None
-    limit: int = 25
+    limit: int = DEFAULT_CLAIM_READ_LIMIT
 
 
 class ClaimReadLimitError(ValueError):
@@ -299,41 +303,55 @@ ORDER BY a.id ASC, b.id ASC"""
         if start is None:
             return ()
         start_predicate = start["predicate"]
-        predicate_clauses = [
-            f"c.id = {int(claim_id)}",
-            "c.predicate = older.predicate",
-        ]
+        predicate_clauses = ["current.predicate = older.predicate"]
         if scope.predicate:
             predicate_clauses.extend(
                 [
-                    f"c.predicate = {lit(scope.predicate)}",
+                    f"current.predicate = {lit(scope.predicate)}",
                     f"older.predicate = {lit(scope.predicate)}",
                 ]
             )
-        rows = self._db.query(
-            f"""
-MATCH (c:Claim {{id: {int(claim_id)}}})-[:SUPERSEDES*1..5]->(older:Claim)
+        scoped_rows = []
+        pending = [(int(claim_id), 0)]
+        seen_ids = {int(claim_id)}
+        cursor = 0
+        while cursor < len(pending):
+            current_id, current_depth = pending[cursor]
+            cursor += 1
+            if current_depth >= MAX_CHAIN_DEPTH:
+                continue
+            rows = self._db.query(
+                f"""
+MATCH (current:Claim {{id: {current_id}}})-[:SUPERSEDES]->(older:Claim)
 WHERE {" AND ".join(predicate_clauses)}
 RETURN older.id AS id, older.value AS value,
        older.valid_from AS valid_from, older.valid_to AS valid_to,
        older.predicate AS predicate
 ORDER BY older.valid_from DESC, older.id DESC"""
-        )
-        scoped_rows = []
-        for row in rows:
-            if row["predicate"] != start_predicate:
-                continue
-            older_id = int(row["id"])
-            older = self._read_claim_scope_membership(older_id, scope)
-            if older is None or older["predicate"] != start_predicate:
-                continue
-            scoped_rows.append(
-                {
-                    **row,
-                    "subject": older["subject"],
-                    "predicate": older["predicate"],
-                }
             )
+            rows = sorted(
+                rows,
+                key=lambda row: (str(row["valid_from"]), int(row.get("id", 0))),
+                reverse=True,
+            )
+            for row in rows:
+                older_id = int(row["id"])
+                if older_id in seen_ids:
+                    continue
+                seen_ids.add(older_id)
+                if row["predicate"] != start_predicate:
+                    continue
+                older = self._read_claim_scope_membership(older_id, scope)
+                if older is None or older["predicate"] != start_predicate:
+                    continue
+                scoped_rows.append(
+                    {
+                        **row,
+                        "subject": older["subject"],
+                        "predicate": older["predicate"],
+                    }
+                )
+                pending.append((older_id, current_depth + 1))
         return tuple(
             sorted(
                 scoped_rows,

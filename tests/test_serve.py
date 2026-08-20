@@ -193,6 +193,27 @@ def test_dispatch_maps_claim_limit_for_ask_and_logs_safe_context(monkeypatch, ca
     assert "private source text" not in caplog.text
 
 
+def test_dispatch_maps_bare_claim_limit_for_ask(monkeypatch, caplog):
+    def broken(*args, **kwargs):
+        raise ClaimReadLimitError()
+
+    monkeypatch.setattr(serve, "handle_ask", broken)
+    with caplog.at_level("ERROR", logger="hydraclaim.serve"):
+        status, payload, _ = serve.dispatch(
+            "POST", "/ask", {"question": "Who owns payments?"}, FakeDB(), None
+        )
+
+    assert status == 409
+    assert payload == {
+        "code": "claim_limit_exceeded",
+        "error": "claim read limit exceeded",
+    }
+    assert "endpoint=/ask" in caplog.text
+    assert "limit=25" in caplog.text
+    assert "exception_type=ClaimReadLimitError" in caplog.text
+    assert "Traceback" in caplog.text
+
+
 def test_dispatch_maps_claim_limit_for_graph_and_logs_subject(monkeypatch, caplog):
     def broken(*args, **kwargs):
         raise ClaimReadLimitError(

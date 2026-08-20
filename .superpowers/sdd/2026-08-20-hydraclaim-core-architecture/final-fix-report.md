@@ -16,8 +16,10 @@ Files: `hydraclaim/claim_read.py`, `hydraclaim/schema.py`,
   `MATCH` clause.
 - Relation reads use one-edge queries. Each source and target claim passes a
   bounded one-hop `ABOUT` check for the selected subject and predicate.
-- Chain reads use one bounded variable-length path. The starting claim and
-  each older claim pass a bounded one-hop `ABOUT` check.
+- Chain reads use bounded iterative one-hop `SUPERSEDES` queries. The starting
+  claim and each discovered older claim pass a bounded one-hop `ABOUT` check.
+- Chain traversal stops at depth five and tracks seen claim identifiers for
+  cycle safety.
 - Claim reads issue `LIMIT limit + 1` and raise `ClaimReadLimitError` when more
   rows exist. They do not silently truncate.
 - The schema battery includes the exact selected-relation query shapes and tests
@@ -63,13 +65,13 @@ variables, and Ruff formatting changes. Demo behavior is not refactored.
 
 | Command | Result |
 | --- | --- |
-| `python -m pytest -q` | **221 passed** in 1.10 s |
+| `python -m pytest -q` | **224 passed** in 1.28 s |
 | `ruff check --fix .` | **All checks passed** |
-| `ruff format .` | **4 files reformatted; 48 files left unchanged** |
+| `ruff format .` | **52 files left unchanged** on the final check |
 | `ruff format --check .` | **52 files already formatted** |
 | `git diff --check` | No whitespace errors |
 
-Focused runs also passed: claim-read and serve tests (36); retrieval tests
+Focused runs also passed: claim-read and serve tests (39); retrieval tests
 (12); and schema tests (6).
 
 ## Live HydraDB evidence
@@ -88,7 +90,7 @@ The required live command also completed successfully:
 
 ```text
 python -m hydraclaim.schema --verify
-probe run id: 5398d2ac
+probe run id: b703cfe9
 PASS  one-hop CREATE + read back  (1 row(s) back)
 PASS  property-scoped selected relation reads  (1 row(s) back)
 PASS  upsert by integer id (re-CREATE is idempotent)  (1 row(s) back)
