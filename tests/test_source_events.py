@@ -20,6 +20,27 @@ class CaptureDB:
         return []
 
 
+class AttemptDB(CaptureDB):
+    def __init__(self, event_status="CAPTURED", attempt_count=0):
+        super().__init__()
+        self.event_status = event_status
+        self.attempt_count = attempt_count
+
+    def query_one(self, cypher: str):
+        self.queries.append(cypher)
+        if "RETURN event.status AS status" in cypher:
+            return {"status": self.event_status}
+        if "RETURN count(*) AS c" in cypher and "Extraction" in cypher:
+            return {"c": self.attempt_count}
+        if "RETURN extraction.status AS status" in cypher:
+            return {
+                "status": "RUNNING",
+                "event_id": 101,
+                "event_key": "source-event:slack:message-42",
+            }
+        return {"c": 0}
+
+
 def event(**overrides):
     value = {
         "source_kind": "slack",
@@ -90,3 +111,51 @@ def test_repeated_capture_does_not_write_duplicate_event():
 
     assert result["created"] is False
     assert len(db.queries) == 1
+
+
+def test_start_extraction_records_numbered_attempt():
+    db = AttemptDB(attempt_count=2)
+
+    result = SourceEventStore(db).start_extraction(
+        "source-event:slack:message-42", "openrouter", "deepseek", "v1"
+    )
+
+    assert result["extraction_key"].endswith(":extraction:3")
+    assert result["status"] == "RUNNING"
+    assert "READ_FROM" in db.queries[-1]
+
+
+def test_start_extraction_rejects_processed_event_without_reprocess():
+    db = AttemptDB(event_status="PROCESSED")
+
+    with pytest.raises(ValueError, match="already processed"):
+        SourceEventStore(db).start_extraction("event", "provider", "model", "v1")
+
+    assert not any("CREATE" in query for query in db.queries)
+
+
+def test_complete_extraction_links_claims_and_updates_states():
+    db = AttemptDB()
+
+    result = SourceEventStore(db).complete_extraction("extraction", ["claim-1"])
+
+    assert result == {"extraction_key": "extraction", "status": "SUCCEEDED"}
+    assert any("PRODUCED_BY" in query for query in db.queries)
+    assert any("event.status = 'PROCESSED'" in query for query in db.queries)
+
+
+def test_failure_records_step_error_and_traceback_and_stops_state():
+    db = AttemptDB()
+
+    try:
+        raise RuntimeError("model stopped")
+    except RuntimeError as exc:
+        result = SourceEventStore(db).fail_extraction("extraction", "EXTRACT", exc)
+
+    assert result["status"] == "FAILED"
+    write = "\n".join(db.queries)
+    assert "FailureRecord" in write
+    assert "error_type: 'RuntimeError'" in write
+    assert "model stopped" in write
+    assert "Traceback" in write
+    assert "event.status = 'FAILED'" in write
