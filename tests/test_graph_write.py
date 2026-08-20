@@ -261,6 +261,17 @@ def test_ingest_validates_before_first_query():
     assert db.queries == []
 
 
+def test_oracle_ingest_creates_processed_source_event_without_extraction():
+    db = RecordingDB()
+    GraphWriter(db).ingest_document(_scenario())
+    writes = "\n".join(db.writes)
+    assert "SourceEvent" in writes
+    assert "ingestion_kind: 'ORACLE'" in writes
+    assert "PROCESSED" in writes
+    assert "QUOTED_FROM" in writes
+    assert "Extraction" not in writes
+
+
 def test_apply_plan_validates_before_first_query():
     db = RecordingDB()
     invalid = _plan()

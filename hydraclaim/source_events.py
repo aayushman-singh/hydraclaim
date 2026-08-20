@@ -90,8 +90,10 @@ class SourceEventStore:
             checked, key, captured_at, _content_hash(checked)
         )
         properties["ingestion_kind"] = ingestion_kind
+        if ingestion_kind == "ORACLE":
+            properties["status"] = "PROCESSED"
         self._db.query(f"CREATE (event:SourceEvent {_props(properties)})")
-        return {"event_key": key, "status": "CAPTURED", "created": True}
+        return {"event_key": key, "status": properties["status"], "created": True}
 
     def start_extraction(
         self,

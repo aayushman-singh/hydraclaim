@@ -113,6 +113,12 @@ def test_repeated_capture_does_not_write_duplicate_event():
     assert len(db.queries) == 1
 
 
+def test_oracle_capture_is_immediately_processed():
+    db = CaptureDB()
+    SourceEventStore(db).capture(event(), ingestion_kind="ORACLE")
+    assert "status: 'PROCESSED'" in db.queries[-1]
+
+
 def test_start_extraction_records_numbered_attempt():
     db = AttemptDB(attempt_count=2)
 
