@@ -78,3 +78,35 @@ Commit is recorded in the final task handoff.
 ### Round 1 commit
 
 Commit is recorded in the final task handoff.
+
+## Round 2 fix report
+
+### Findings addressed
+
+- Temporal and conflict equal-timestamp fixtures now set the same explicit
+  `valid_from` value and verify stable claim-key or identifier ordering.
+- The chain adapter now returns valid rows plus cross-subject and
+  cross-predicate rows. The scoped reader filters the unrelated rows before
+  returning the chain.
+- Chain regression names and assertions describe the timestamp and scope
+  behavior under test.
+
+### Exact verification
+
+- `python -m pytest tests/test_claim_read.py -q` before the production filter:
+  7 passed, 1 failed as expected because cross-scope chain rows were returned.
+- `python -m pytest tests/test_claim_read.py -q`: 8 passed.
+- `python -m pytest tests/test_claim_read.py tests/test_retrieve.py
+  tests/test_serve.py tests/test_benchmark.py -q`: 48 passed.
+- `python -m pytest -q`: 171 passed.
+- Focused Ruff check for implementation files and read tests: passed.
+- `ruff format --check` for implementation files and read tests: 6 files
+  already formatted.
+- `ruff check --fix .`: exit 1 only for existing `F841` errors in
+  `demo/term-video.py` (`max_w` and `total_frames`); four unrelated fixes were
+  restored.
+- `git diff --check`: passed.
+
+### Round 2 commit
+
+Commit is recorded in the final task handoff.

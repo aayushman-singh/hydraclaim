@@ -40,6 +40,7 @@ def _claim(
     status: str = "active",
     predicate: str = "deadline",
     subject: str = "product launch",
+    valid_from: str = "2026-08-01",
 ) -> dict:
     return {
         "id": claim_id,
@@ -47,7 +48,7 @@ def _claim(
         "subject": subject,
         "predicate": predicate,
         "value": value,
-        "valid_from": "2026-08-01",
+        "valid_from": valid_from,
         "valid_to": "",
         "status": status,
         "confidence": 0.9,
@@ -134,8 +135,14 @@ def test_equal_timestamp_active_selection_is_stable():
 def test_equal_timestamp_temporal_result_uses_stable_history_order():
     db = _OrderingDB(
         [
-            _claim(1, "claim-1", "2026-10-01", status="superseded"),
-            _claim(2, "claim-2", "2026-10-02"),
+            _claim(
+                1,
+                "claim-1",
+                "2026-10-01",
+                status="superseded",
+                valid_from="2026-08-01",
+            ),
+            _claim(2, "claim-2", "2026-10-02", valid_from="2026-08-01"),
         ]
     )
 
@@ -150,8 +157,8 @@ def test_equal_timestamp_temporal_result_uses_stable_history_order():
 def test_equal_timestamp_conflict_citations_use_stable_claim_order():
     db = _OrderingDB(
         [
-            _claim(1, "claim-1", "2026-10-01"),
-            _claim(2, "claim-2", "2026-10-02"),
+            _claim(1, "claim-1", "2026-10-01", valid_from="2026-08-01"),
+            _claim(2, "claim-2", "2026-10-02", valid_from="2026-08-01"),
         ]
     )
 
@@ -167,8 +174,38 @@ def test_chain_scope_constrains_start_and_older_claims_and_orders_ties():
     db = _OrderingDB(
         [],
         chain=[
-            {"id": 1, "value": "old-1", "valid_from": "2026-08-01", "valid_to": ""},
-            {"id": 2, "value": "old-2", "valid_from": "2026-08-01", "valid_to": ""},
+            {
+                "id": 1,
+                "value": "old-1",
+                "valid_from": "2026-08-01",
+                "valid_to": "",
+                "subject": "product launch",
+                "predicate": "deadline",
+            },
+            {
+                "id": 2,
+                "value": "old-2",
+                "valid_from": "2026-08-01",
+                "valid_to": "",
+                "subject": "product launch",
+                "predicate": "deadline",
+            },
+            {
+                "id": 3,
+                "value": "other subject",
+                "valid_from": "2026-08-01",
+                "valid_to": "",
+                "subject": "other subject",
+                "predicate": "deadline",
+            },
+            {
+                "id": 4,
+                "value": "other predicate",
+                "valid_from": "2026-08-01",
+                "valid_to": "",
+                "subject": "product launch",
+                "predicate": "status",
+            },
         ],
     )
 

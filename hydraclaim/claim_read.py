@@ -265,9 +265,19 @@ WHERE c.id = {int(claim_id)}
   AND c.predicate = older.predicate
   {predicate_clause}
 RETURN older.id AS id, older.value AS value,
-       older.valid_from AS valid_from, older.valid_to AS valid_to
+       older.valid_from AS valid_from, older.valid_to AS valid_to,
+       e.name AS subject, older.predicate AS predicate
 ORDER BY older.valid_from DESC, older.id DESC"""
         )
+        rows = [
+            row
+            for row in rows
+            if row.get("subject", scope.subject) == scope.subject
+            and (
+                scope.predicate is None
+                or row.get("predicate", scope.predicate) == scope.predicate
+            )
+        ]
         return tuple(
             sorted(
                 rows,
