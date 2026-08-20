@@ -335,6 +335,21 @@ def test_llm_suggestions_return_empty_without_heuristic_baseline(monkeypatch):
     }
 
 
+def test_llm_suggestions_reject_duplicate_routes(monkeypatch):
+    monkeypatch.setattr(
+        "hydraclaim.llm.chat_json",
+        lambda messages: {
+            "suggestions": [
+                {"text": "first", "route": "FAST"},
+                {"text": "second", "route": "FAST"},
+            ]
+        },
+    )
+
+    with pytest.raises(serve.SuggestionResponseError, match="duplicate route"):
+        serve.handle_suggestions(object(), suggestion_mode="llm")
+
+
 @pytest.mark.parametrize(
     ("raw", "status", "code"),
     [

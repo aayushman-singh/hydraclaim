@@ -246,7 +246,9 @@ def handle_suggestions(llm_fn, *, suggestion_mode: str = "heuristic") -> dict[st
                 f"suggestion response item {index} has invalid route"
             )
         if route in seen:
-            continue
+            raise SuggestionResponseError(
+                f"suggestion response item {index} has duplicate route {route!r}"
+            )
         seen.add(route)
         deduped.append({"text": text, "route": route})
     if not deduped:
