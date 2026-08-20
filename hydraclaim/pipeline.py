@@ -164,6 +164,12 @@ def run_pipeline(
                 "content": message["text"],
                 "source_id": message["msg_id"],
             }
+            if step_hook:
+                step_hook(
+                    "capture",
+                    session_index=session_index,
+                    session_count=len(doc["sessions"]),
+                )
             capture = event_store.capture(event)
             event_key = capture["event_key"]
             print(f"{event_key}: {capture['status']}")
@@ -174,9 +180,17 @@ def run_pipeline(
                 "extract-v1",
             )
             extraction_key = attempt["extraction_key"]
+            if step_hook:
+                step_hook(
+                    "read_active",
+                    session_index=session_index,
+                    session_count=len(doc["sessions"]),
+                )
             active = fetch_active_claims(db)
             one_message = {**session, "messages": [message]}
             try:
+                if step_hook:
+                    step_hook("extract", active_count=len(active))
                 drafts, warnings = extract_session(one_message, doc["entities"], active)
             except Exception as exc:
                 event_store.fail_extraction(extraction_key, "EXTRACT", exc)
@@ -184,6 +198,8 @@ def run_pipeline(
             for warning in warnings:
                 print(f"warn [{message['msg_id']}]: {warning}", file=sys.stderr)
             try:
+                if step_hook:
+                    step_hook("reconcile", draft_count=len(drafts))
                 plan = plan_writes(
                     drafts,
                     active,
@@ -194,6 +210,15 @@ def run_pipeline(
                 event_store.fail_extraction(extraction_key, "RECONCILE", exc)
                 raise
             try:
+                if step_hook:
+                    step_hook(
+                        "graph_write",
+                        plan_create_count=len(plan["create"]),
+                        plan_supersede_count=len(plan["supersede"]),
+                        plan_contradict_count=len(plan["contradict"]),
+                        plan_duplicate_count=plan["duplicates"],
+                        applied=False,
+                    )
                 applied = writer.apply_plan(
                     plan,
                     scen,
