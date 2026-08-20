@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import re
 from copy import deepcopy
 
 import pytest
 
 from hydraclaim import ingest, reconcile
+from hydraclaim.errors import GraphIntegrityError
 from hydraclaim.graph_write import GraphWriter
 from hydraclaim.model import graph_id
 
@@ -16,7 +18,8 @@ class RecordingDB:
 
     def query(self, cypher):
         self.queries.append(cypher)
-        self.writes.append(cypher)
+        if cypher.lstrip().startswith("CREATE") or " SET " in cypher:
+            self.writes.append(cypher)
         return []
 
     def query_one(self, cypher):
@@ -27,19 +30,50 @@ class RecordingDB:
 class IdempotentDB(RecordingDB):
     def __init__(self):
         super().__init__()
-        self.claim_ids = set()
+        self.nodes = {
+            label: set() for label in ("Claim", "Evidence", "Source", "Entity")
+        }
+        self.edges = set()
 
     def query(self, cypher):
         result = super().query(cypher)
-        if "SUPPORTED_BY" in cypher:
-            self.claim_ids.add(graph_id("scenario:c1"))
+        for label, node_id in re.findall(
+            r":(Claim|Evidence|Source|Entity) \{id: (\d+)", cypher
+        ):
+            self.nodes[label].add(int(node_id))
+        for label_a, id_a, relation, label_b, id_b in re.findall(
+            r"\((?:\w+):(?P<label_a>\w+) \{id: (?P<id_a>\d+)[^}]*\}\)-\[:(?P<relation>\w+)\]->"
+            r"\((?:\w+):(?P<label_b>\w+) \{id: (?P<id_b>\d+)[^}]*\}\)",
+            cypher,
+        ):
+            self.edges.add((label_a, int(id_a), relation, label_b, int(id_b)))
         return result
 
     def query_one(self, cypher):
         self.queries.append(cypher)
-        if "(n:Claim" in cypher:
-            claim_id = int(cypher.split("id: ", 1)[1].split("}", 1)[0])
-            return {"c": int(claim_id in self.claim_ids)}
+        edge = re.search(
+            r"\((?P<label_a>\w+):(?P<type_a>\w+) \{id: (?P<id_a>\d+)\}\)-\[:(?P<relation>\w+)\]->"
+            r"\((?P<label_b>\w+):(?P<type_b>\w+) \{id: (?P<id_b>\d+)\}\)",
+            cypher,
+        )
+        if edge:
+            values = edge.groupdict()
+            return {
+                "c": int(
+                    (
+                        values["type_a"],
+                        int(values["id_a"]),
+                        values["relation"],
+                        values["type_b"],
+                        int(values["id_b"]),
+                    )
+                    in self.edges
+                )
+            }
+        node = re.search(r"\(n:(?P<label>\w+) \{id: (?P<id>\d+)\}", cypher)
+        if node:
+            values = node.groupdict()
+            return {"c": int(int(values["id"]) in self.nodes[values["label"]])}
         return {"c": 0}
 
 
@@ -254,3 +288,202 @@ def test_apply_plan_rejects_invalid_deadline_value_before_any_write():
 
     assert db.writes == []
     assert db.queries == []
+
+
+class IntegrityDB(RecordingDB):
+    def __init__(self, claims=None, edges=()):
+        super().__init__()
+        self.claims = claims or {}
+        self.edges = set(edges)
+
+    def query_one(self, cypher):
+        self.queries.append(cypher)
+        if "MATCH (n:Claim" in cypher:
+            claim_id = int(cypher.split("id: ", 1)[1].split("}", 1)[0])
+            return {
+                "c": int(claim_id in {value["id"] for value in self.claims.values()})
+            }
+        if "MATCH (c:Claim" in cypher and "[:ABOUT]" in cypher:
+            claim_id = int(cypher.split("id: ", 1)[1].split("}", 1)[0])
+            for claim in self.claims.values():
+                if claim["id"] == claim_id:
+                    return {
+                        "id": claim_id,
+                        "subject": claim["subject"],
+                        "predicate": claim["predicate"],
+                    }
+            return None
+        if "-[:SUPERSEDES]->" in cypher:
+            parts = cypher.split("id: ")
+            source_id = int(parts[1].split("}", 1)[0])
+            target_id = int(parts[2].split("}", 1)[0])
+            return {"c": int((source_id, target_id) in self.edges)}
+        return {"c": 0}
+
+    def query(self, cypher, consistency="causal"):
+        self.queries.append(cypher)
+        if "MATCH (a:Claim" in cypher and "[:SUPERSEDES]->" in cypher:
+            source_id = int(cypher.split("id: ", 1)[1].split("}", 1)[0])
+            return [
+                {"new_id": source_id, "old_id": old_id}
+                for new_id, old_id in sorted(self.edges)
+                if new_id == source_id
+            ]
+        self.writes.append(cypher)
+        return []
+
+
+class FailureAfterStepDB:
+    def __init__(self, fail_after=None):
+        self.fail_after = fail_after
+        self.operations = 0
+        self.claims = set()
+        self.evidence = set()
+        self.sources = set()
+        self.entities = set()
+        self.edges = set()
+
+    def _step(self):
+        self.operations += 1
+        if self.fail_after is not None and self.operations == self.fail_after:
+            raise RuntimeError("recording adapter failed after step")
+
+    def query_one(self, cypher):
+        import re
+
+        edge = re.search(
+            r"\(a:(\w+) \{id: (\d+)\}\)-\[:(\w+)\]->\(b:(\w+) \{id: (\d+)\}\)",
+            cypher,
+        )
+        if edge:
+            label_a, id_a, relation, label_b, id_b = edge.groups()
+            return {
+                "c": int(
+                    (label_a, int(id_a), relation, label_b, int(id_b)) in self.edges
+                )
+            }
+        node = re.search(r"\(n:(\w+) \{id: (\d+)\}\)", cypher)
+        if node:
+            label, node_id = node.groups()
+            values = {
+                "Claim": self.claims,
+                "Evidence": self.evidence,
+                "Source": self.sources,
+                "Entity": self.entities,
+            }[label]
+            return {"c": int(int(node_id) in values)}
+        return {"c": 0}
+
+    def query(self, cypher, consistency="causal"):
+        import re
+
+        self._step()
+        node = re.search(r"\(\w+:(\w+) \{id: (\d+)", cypher)
+        if node:
+            label, node_id = node.groups()
+            values = {
+                "Claim": self.claims,
+                "Evidence": self.evidence,
+                "Source": self.sources,
+                "Entity": self.entities,
+            }[label]
+            values.add(int(node_id))
+        edge = re.search(
+            r"\(\w+:(\w+) \{id: (\d+)\}\)-\[:(\w+)\]->\(\w+:(\w+) \{id: (\d+)\}\)",
+            cypher,
+        )
+        if edge:
+            label_a, id_a, relation, label_b, id_b = edge.groups()
+            self.edges.add((label_a, int(id_a), relation, label_b, int(id_b)))
+        return []
+
+
+def test_apply_plan_retry_repairs_a_failure_after_a_partial_write():
+    db = FailureAfterStepDB(fail_after=2)
+    writer = GraphWriter(db)
+
+    with pytest.raises(RuntimeError, match="failed after step"):
+        writer.apply_plan(_plan(), "scenario")
+
+    db.fail_after = None
+    writer.apply_plan(_plan(), "scenario")
+
+    claim_id = graph_id("scenario:c1")
+    evidence_id = graph_id("scenario:c1:ev0")
+    source_id = graph_id("slack:Asha Rao")
+    entity_id = graph_id("scenario:project")
+    assert claim_id in db.claims
+    assert evidence_id in db.evidence
+    assert source_id in db.sources
+    assert entity_id in db.entities
+    assert (
+        "Claim",
+        claim_id,
+        "SUPPORTED_BY",
+        "Evidence",
+        evidence_id,
+    ) in db.edges
+    assert ("Evidence", evidence_id, "FROM", "Source", source_id) in db.edges
+    assert ("Claim", claim_id, "ABOUT", "Entity", entity_id) in db.edges
+
+
+def _integrity_claim(key, subject="project", predicate="status"):
+    claim = _claim(key=key, subject=subject, predicate=predicate)
+    claim["id"] = key
+    return claim
+
+
+def _integrity_plan(edges):
+    return {
+        "create": [],
+        "supersede": [
+            {"new_id": new_id, "old_id": old_id, "at": "2026-05-02"}
+            for new_id, old_id in edges
+        ],
+        "contradict": [],
+        "duplicates": 0,
+        "warnings": [],
+    }
+
+
+def test_apply_plan_rejects_self_supersession_before_writes():
+    db = IntegrityDB(
+        claims={
+            "c1": {"id": graph_id("c1"), "subject": "project", "predicate": "status"}
+        }
+    )
+    plan = _integrity_plan([("c1", "c1")])
+
+    with pytest.raises(GraphIntegrityError, match="self-supersession"):
+        GraphWriter(db).apply_plan(plan, "scenario")
+
+    assert db.writes == []
+
+
+def test_apply_plan_rejects_cross_scope_supersession_before_writes():
+    db = IntegrityDB(
+        claims={
+            "new": {"id": graph_id("new"), "subject": "project", "predicate": "status"},
+            "old": {"id": graph_id("old"), "subject": "person", "predicate": "status"},
+        }
+    )
+    plan = _integrity_plan([("new", "old")])
+
+    with pytest.raises(GraphIntegrityError, match="same subject and predicate"):
+        GraphWriter(db).apply_plan(plan, "scenario")
+
+    assert db.writes == []
+
+
+def test_apply_plan_rejects_cycle_using_existing_edges_before_writes():
+    claims = {
+        key: {"id": graph_id(key), "subject": "project", "predicate": "status"}
+        for key in ("new", "old")
+    }
+    db = IntegrityDB(claims=claims, edges={(graph_id("old"), graph_id("new"))})
+    plan = _integrity_plan([("new", "old")])
+
+    with pytest.raises(GraphIntegrityError, match="cycle"):
+        GraphWriter(db).apply_plan(plan, "scenario")
+
+    assert db.writes == []

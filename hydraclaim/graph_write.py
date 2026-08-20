@@ -12,7 +12,9 @@ from datetime import date, datetime, timezone
 from typing import Any
 
 from hydraclaim.claims import PREDICATES, SOURCE_KINDS, validate_scenario
+from hydraclaim.claim_read import ClaimReadLimitError, DEFAULT_CLAIM_READ_LIMIT
 from hydraclaim.cypher import to_cypher_literal as lit
+from hydraclaim.errors import GraphIntegrityError
 from hydraclaim.model import (
     claim_props,
     entity_key,
@@ -61,6 +63,11 @@ def _node_exists(db: Any, label: str, key: str) -> bool:
     return bool(row and row.get("c", 0) > 0)
 
 
+def _node_exists_id(db: Any, label: str, node_id: int) -> bool:
+    row = db.query_one(f"MATCH (n:{label} {{id: {int(node_id)}}}) RETURN count(*) AS c")
+    return bool(row and row.get("c", 0) > 0)
+
+
 def _edge_exists(
     db: Any,
     label_a: str,
@@ -82,25 +89,65 @@ def _write_claim(
     claim: dict,
     entity_endpoint: str,
     recorded_at: str,
-) -> None:
-    """Create one claim, its evidence and source, and its entity attachment."""
+) -> bool:
+    """Ensure one claim, its provenance, and its entity attachment exist."""
     claim_properties = _props(claim_props(claim, claim_id, recorded_at))
     evidence_properties = _props(evidence_props(claim, claim_id))
     evidence_id = evidence_props(claim, claim_id)["id"]
     source_properties = _props(source_props(claim["source_kind"], claim["author"]))
+    source_id = source_props(claim["source_kind"], claim["author"])["id"]
+    claim_id_int = graph_id(claim_id)
+    claim_exists = _node_exists(db, "Claim", claim_id)
+    created_claim = not claim_exists
+    evidence_exists = _node_exists_id(db, "Evidence", evidence_id)
+    supported_by_created = False
 
-    db.query(
-        f"CREATE (c:Claim {claim_properties})-[:SUPPORTED_BY]->"
-        f"(ev:Evidence {evidence_properties})"
-    )
-    db.query(
-        f"CREATE (ev:Evidence {{id: {evidence_id}}})-[:FROM]->"
-        f"(s:Source {source_properties})"
-    )
-    db.query(
-        f"CREATE (c:Claim {{id: {graph_id(claim_id)}}})-[:ABOUT]->"
-        f"(e:Entity {entity_endpoint})"
-    )
+    if not claim_exists:
+        if not evidence_exists:
+            db.query(
+                f"CREATE (c:Claim {claim_properties})-[:SUPPORTED_BY]->"
+                f"(ev:Evidence {evidence_properties})"
+            )
+            evidence_exists = True
+            supported_by_created = True
+        else:
+            db.query(f"CREATE (c:Claim {claim_properties})")
+        claim_exists = True
+    if not supported_by_created and not _edge_exists(
+        db, "Claim", claim_id_int, "SUPPORTED_BY", "Evidence", evidence_id
+    ):
+        if not evidence_exists:
+            db.query(f"CREATE (ev:Evidence {evidence_properties})")
+            evidence_exists = True
+        db.query(
+            f"CREATE (c:Claim {{id: {claim_id_int}}})-[:SUPPORTED_BY]->"
+            f"(ev:Evidence {{id: {evidence_id}}})"
+        )
+
+    if not _node_exists_id(db, "Source", source_id):
+        db.query(f"CREATE (s:Source {source_properties})")
+    if not _edge_exists(db, "Evidence", evidence_id, "FROM", "Source", source_id):
+        db.query(
+            f"CREATE (ev:Evidence {{id: {evidence_id}}})-[:FROM]->"
+            f"(s:Source {{id: {source_id}}})"
+        )
+
+    entity_id = _entity_id_from_endpoint(entity_endpoint)
+    if not _node_exists_id(db, "Entity", entity_id):
+        db.query(f"CREATE (e:Entity {entity_endpoint})")
+    if not _edge_exists(db, "Claim", claim_id_int, "ABOUT", "Entity", entity_id):
+        db.query(
+            f"CREATE (c:Claim {{id: {claim_id_int}}})-[:ABOUT]->"
+            f"(e:Entity {{id: {entity_id}}})"
+        )
+    return created_claim
+
+
+def _entity_id_from_endpoint(endpoint: str) -> int:
+    match = re.search(r"id:\s*(\d+)", endpoint)
+    if match is None:
+        raise GraphIntegrityError("invalid Entity endpoint")
+    return int(match.group(1))
 
 
 def _write_edge(db: Any, rel: str, a_key: str, b_key: str, props: dict) -> bool:
@@ -370,9 +417,110 @@ def _validate_relation_endpoints(db: Any, plan: dict) -> None:
         if not exists:
             missing.append(f"{relation} endpoint {claim_id!r}")
     if missing:
-        raise ValueError(
+        raise GraphIntegrityError(
             "invalid write plan: unknown Claim endpoint(s): " + ", ".join(missing)
         )
+
+
+def _claim_metadata(db: Any, claim_id: str) -> tuple[str, str]:
+    row = db.query_one(
+        f"MATCH (c:Claim {{id: {graph_id(claim_id)}}})-[:ABOUT]->(e:Entity) "
+        "RETURN e.name AS subject, c.predicate AS predicate LIMIT 2"
+    )
+    if (
+        not isinstance(row, dict)
+        or not isinstance(row.get("subject"), str)
+        or not isinstance(row.get("predicate"), str)
+    ):
+        raise GraphIntegrityError(
+            f"cannot verify supersession scope for Claim {claim_id!r}"
+        )
+    return row["subject"], row["predicate"]
+
+
+def _existing_supersession_edges(
+    db: Any, starting_ids: set[int]
+) -> set[tuple[int, int]]:
+    """Read all reachable existing supersession edges before a write."""
+    pending = list(sorted(starting_ids))
+    seen: set[int] = set()
+    edges: set[tuple[int, int]] = set()
+    while pending:
+        current_id = pending.pop(0)
+        if current_id in seen:
+            continue
+        seen.add(current_id)
+        rows = db.query(
+            f"MATCH (a:Claim {{id: {current_id}}})-[:SUPERSEDES]->(b:Claim) "
+            "RETURN a.id AS new_id, b.id AS old_id "
+            f"LIMIT {DEFAULT_CLAIM_READ_LIMIT + 1}"
+        )
+        if not isinstance(rows, list):
+            raise GraphIntegrityError("invalid supersession edge response")
+        if len(rows) > DEFAULT_CLAIM_READ_LIMIT:
+            raise ClaimReadLimitError(
+                "supersession integrity read limit exceeded",
+                limit=DEFAULT_CLAIM_READ_LIMIT,
+            )
+        for row in rows:
+            if not isinstance(row, dict):
+                raise GraphIntegrityError("invalid supersession edge row")
+            try:
+                edge = (int(row["new_id"]), int(row["old_id"]))
+            except (KeyError, TypeError, ValueError) as exc:
+                raise GraphIntegrityError("invalid supersession edge row") from exc
+            if edge not in edges:
+                edges.add(edge)
+                pending.append(edge[1])
+    return edges
+
+
+def _validate_supersession_integrity(
+    db: Any,
+    edges: list[dict],
+    claim_metadata: dict[str, tuple[str, str]],
+) -> None:
+    """Reject invalid scope or cyclic supersession edges before any write."""
+    if not edges:
+        return
+    planned: set[tuple[int, int]] = set()
+    relevant_ids: set[int] = set()
+    for edge in edges:
+        new_key, old_key = edge["new_id"], edge["old_id"]
+        if new_key == old_key:
+            raise GraphIntegrityError(
+                f"self-supersession is not allowed for Claim {new_key!r}"
+            )
+        new_scope = claim_metadata.get(new_key) or _claim_metadata(db, new_key)
+        old_scope = claim_metadata.get(old_key) or _claim_metadata(db, old_key)
+        if new_scope != old_scope:
+            raise GraphIntegrityError(
+                "SUPERSEDES endpoints must have the same subject and predicate: "
+                f"{new_key!r} -> {old_key!r}"
+            )
+        new_id, old_id = graph_id(new_key), graph_id(old_key)
+        planned.add((new_id, old_id))
+        relevant_ids.update((new_id, old_id))
+
+    existing = _existing_supersession_edges(db, relevant_ids)
+    combined = existing | planned
+    indegree: dict[int, int] = {}
+    forward: dict[int, set[int]] = {}
+    for new_id, old_id in combined:
+        indegree.setdefault(new_id, 0)
+        indegree[old_id] = indegree.get(old_id, 0) + 1
+        forward.setdefault(new_id, set()).add(old_id)
+    pending = [node for node, degree in indegree.items() if degree == 0]
+    processed = 0
+    while pending:
+        node = pending.pop()
+        processed += 1
+        for child in sorted(forward.get(node, ())):
+            indegree[child] -= 1
+            if indegree[child] == 0:
+                pending.append(child)
+    if processed != len(indegree):
+        raise GraphIntegrityError("SUPERSEDES cycle detected before graph write")
 
 
 class GraphWriter:
@@ -419,20 +567,37 @@ class GraphWriter:
                     )
                 )
 
+        supersede_edges = [
+            {
+                "new_id": f"{scenario_id}:{claim['key']}",
+                "old_id": f"{scenario_id}:{claim['supersedes']}",
+            }
+            for claim in claims
+            if claim.get("supersedes")
+        ]
+        claim_metadata = {
+            f"{scenario_id}:{claim['key']}": (
+                claim["subject"],
+                claim["predicate"],
+            )
+            for claim in claims
+        }
+        _validate_supersession_integrity(self._db, supersede_edges, claim_metadata)
+
         for claim in claims:
             claim_id = f"{scenario_id}:{claim['key']}"
-            if _node_exists(self._db, "Claim", claim_id):
-                stats["skipped_existing"] += 1
-                continue
             subject = claim["subject"]
             endpoint = entity_endpoint.get(subject) or _props(
                 entity_props(scenario_id, subject)
             )
-            _write_claim(self._db, claim_id, claim, endpoint, recorded_at)
+            created = _write_claim(self._db, claim_id, claim, endpoint, recorded_at)
+            if not created:
+                stats["skipped_existing"] += 1
             entity_endpoint[subject] = (
                 f"{{id: {graph_id(entity_key(scenario_id, subject))}}}"
             )
-            stats["claims"] += 1
+            if created:
+                stats["claims"] += 1
 
         for claim in claims:
             claim_id = f"{scenario_id}:{claim['key']}"
@@ -466,6 +631,11 @@ class GraphWriter:
         if errors:
             raise ValueError(f"invalid write plan for {scenario_id!r}: {errors}")
         _validate_relation_endpoints(self._db, plan)
+        claim_metadata = {
+            draft["id"]: (draft["subject"], draft["predicate"])
+            for draft in plan["create"]
+        }
+        _validate_supersession_integrity(self._db, plan["supersede"], claim_metadata)
 
         recorded_at = datetime.now(timezone.utc).isoformat()
         stats = {
@@ -482,8 +652,6 @@ class GraphWriter:
 
         for draft in plan["create"]:
             claim_id = draft["id"]
-            if _node_exists(self._db, "Claim", claim_id):
-                continue
             subject = draft["subject"]
             if subject in entity_endpoint:
                 endpoint = entity_endpoint[subject]
@@ -508,8 +676,8 @@ class GraphWriter:
                     )
                     stats["entities_created"] += 1
                 entity_endpoint[subject] = endpoint
-            _write_claim(self._db, claim_id, draft, endpoint, recorded_at)
-            stats["created"] += 1
+            if _write_claim(self._db, claim_id, draft, endpoint, recorded_at):
+                stats["created"] += 1
             entity_endpoint[subject] = (
                 f"{{id: {graph_id(entity_key(scenario_id, subject))}}}"
             )
