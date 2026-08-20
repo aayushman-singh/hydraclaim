@@ -648,6 +648,15 @@ def test_chain_is_cycle_safe():
         ClaimReader(db).read_chain(10, ClaimScope("product launch", "deadline"))
 
 
+def test_chain_checks_cycles_at_the_bounded_depth(monkeypatch):
+    monkeypatch.setattr("hydraclaim.claim_read.MAX_CHAIN_DEPTH", 1)
+
+    with pytest.raises(GraphIntegrityError, match="supersession cycle"):
+        ClaimReader(_CycleChainDB()).read_chain(
+            10, ClaimScope("product launch", "deadline")
+        )
+
+
 def test_chain_accepts_shared_ancestor_in_branching_dag():
     db = _BranchingChainDB()
 

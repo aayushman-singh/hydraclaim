@@ -353,17 +353,18 @@ LIMIT {int(scope.limit) + 1}"""
         scoped_rows = []
         pending = [(int(claim_id), 0)]
         seen_ids = {int(claim_id)}
-        scheduled_ids = {int(claim_id)}
-        expanded_ids: set[int] = set()
+        best_depth = {int(claim_id): 0}
+        expanded_depth: dict[int, int] = {}
         chain_edges: set[tuple[int, int]] = set()
         cursor = 0
         while cursor < len(pending):
             current_id, current_depth = pending[cursor]
             cursor += 1
-            if current_id in expanded_ids:
+            previous_depth = expanded_depth.get(current_id)
+            if previous_depth is not None and previous_depth <= current_depth:
                 continue
-            expanded_ids.add(current_id)
-            if current_depth >= MAX_CHAIN_DEPTH:
+            expanded_depth[current_id] = current_depth
+            if current_depth > MAX_CHAIN_DEPTH:
                 continue
             rows = self._db.query(
                 f"""
@@ -401,7 +402,8 @@ LIMIT {int(scope.limit) + 1}"""
                 if older is None or older["predicate"] != start_predicate:
                     continue
                 chain_edges.add((current_id, older_id))
-                if older_id not in seen_ids:
+                within_depth = current_depth < MAX_CHAIN_DEPTH
+                if older_id not in seen_ids and within_depth:
                     scoped_rows.append(
                         {
                             **row,
@@ -419,9 +421,12 @@ LIMIT {int(scope.limit) + 1}"""
                             predicate=scope.predicate,
                             limit=scope.limit,
                         )
-                if older_id not in scheduled_ids:
-                    pending.append((older_id, current_depth + 1))
-                    scheduled_ids.add(older_id)
+                next_depth = current_depth + 1
+                if within_depth and next_depth < best_depth.get(
+                    older_id, MAX_CHAIN_DEPTH + 1
+                ):
+                    best_depth[older_id] = next_depth
+                    pending.append((older_id, next_depth))
         _chain_depth(chain_edges, seen_ids)
         return tuple(
             sorted(
