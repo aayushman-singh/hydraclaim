@@ -523,6 +523,32 @@ def _validate_supersession_integrity(
         raise GraphIntegrityError("SUPERSEDES cycle detected before graph write")
 
 
+def _validate_contradiction_integrity(
+    db: Any,
+    edges: list[dict],
+    claim_metadata: dict[str, tuple[str, str]],
+) -> None:
+    """Require CONTRADICTS to join two claims in one fact slot.
+
+    The domain invariant is exact: a contradiction has two distinct Claim
+    nodes, and both nodes have the same subject and predicate.  A relation
+    between different fact slots is not a contradiction.
+    """
+    for edge in edges:
+        a_key, b_key = edge["a_id"], edge["b_id"]
+        if a_key == b_key:
+            raise GraphIntegrityError(
+                f"self-CONTRADICTS is not allowed for Claim {a_key!r}"
+            )
+        a_scope = claim_metadata.get(a_key) or _claim_metadata(db, a_key)
+        b_scope = claim_metadata.get(b_key) or _claim_metadata(db, b_key)
+        if a_scope != b_scope:
+            raise GraphIntegrityError(
+                "CONTRADICTS endpoints must have the same subject and predicate: "
+                f"{a_key!r} -> {b_key!r}"
+            )
+
+
 class GraphWriter:
     """Write validated claim graphs through the HydraDB query seam."""
 
@@ -583,6 +609,18 @@ class GraphWriter:
             for claim in claims
         }
         _validate_supersession_integrity(self._db, supersede_edges, claim_metadata)
+        contradict_edges = [
+            {
+                "a_id": claim_id,
+                "b_id": f"{scenario_id}:{other}",
+            }
+            for claim in claims
+            for claim_id in [f"{scenario_id}:{claim['key']}"]
+            for other in claim.get("contradicts_with", [])
+        ]
+        _validate_contradiction_integrity(
+            self._db, contradict_edges, claim_metadata
+        )
 
         for claim in claims:
             claim_id = f"{scenario_id}:{claim['key']}"
@@ -636,6 +674,9 @@ class GraphWriter:
             for draft in plan["create"]
         }
         _validate_supersession_integrity(self._db, plan["supersede"], claim_metadata)
+        _validate_contradiction_integrity(
+            self._db, plan["contradict"], claim_metadata
+        )
 
         recorded_at = datetime.now(timezone.utc).isoformat()
         stats = {

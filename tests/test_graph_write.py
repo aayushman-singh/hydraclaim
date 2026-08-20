@@ -278,6 +278,42 @@ def test_ingest_rejects_invalid_claim_properties_before_any_write():
     assert db.queries == []
 
 
+def test_ingest_rejects_self_contradiction_before_any_write():
+    db = RecordingDB()
+    scenario = _scenario()
+    scenario["ground_truth"]["claims"][0]["contradicts_with"] = ["c1"]
+
+    with pytest.raises(GraphIntegrityError, match="self-CONTRADICTS"):
+        GraphWriter(db).ingest_document(scenario)
+
+    assert db.writes == []
+
+
+@pytest.mark.parametrize(
+    ("subject", "predicate"),
+    [("person", "status"), ("project", "deadline")],
+    ids=("cross-subject", "cross-predicate"),
+)
+def test_ingest_rejects_cross_slot_contradiction_before_any_write(subject, predicate):
+    db = RecordingDB()
+    scenario = _scenario()
+    scenario["entities"].append({"name": "person", "type": "person", "aliases": []})
+    scenario["ground_truth"]["claims"].append(
+        _claim(
+            key="c2",
+            subject=subject,
+            predicate=predicate,
+            value="2026-06-01" if predicate == "deadline" else "active",
+            contradicts_with=["c1"],
+        )
+    )
+
+    with pytest.raises(GraphIntegrityError, match="same subject and predicate"):
+        GraphWriter(db).ingest_document(scenario)
+
+    assert db.writes == []
+
+
 def test_apply_plan_rejects_invalid_deadline_value_before_any_write():
     db = RecordingDB()
     plan = deepcopy(_plan())
@@ -446,6 +482,19 @@ def _integrity_plan(edges):
     }
 
 
+def _contradiction_plan(edges):
+    return {
+        "create": [],
+        "supersede": [],
+        "contradict": [
+            {"a_id": a_id, "b_id": b_id}
+            for a_id, b_id in edges
+        ],
+        "duplicates": 0,
+        "warnings": [],
+    }
+
+
 def test_apply_plan_rejects_self_supersession_before_writes():
     db = IntegrityDB(
         claims={
@@ -455,6 +504,45 @@ def test_apply_plan_rejects_self_supersession_before_writes():
     plan = _integrity_plan([("c1", "c1")])
 
     with pytest.raises(GraphIntegrityError, match="self-supersession"):
+        GraphWriter(db).apply_plan(plan, "scenario")
+
+    assert db.writes == []
+
+
+def test_apply_plan_rejects_self_contradiction_before_writes():
+    db = IntegrityDB(
+        claims={
+            "c1": {"id": graph_id("c1"), "subject": "project", "predicate": "status"}
+        }
+    )
+    plan = _contradiction_plan([("c1", "c1")])
+
+    with pytest.raises(GraphIntegrityError, match="self-CONTRADICTS"):
+        GraphWriter(db).apply_plan(plan, "scenario")
+
+    assert db.writes == []
+
+
+@pytest.mark.parametrize(
+    ("a_scope", "b_scope"),
+    [
+        (("project", "status"), ("person", "status")),
+        (("project", "status"), ("project", "deadline")),
+    ],
+    ids=("cross-subject", "cross-predicate"),
+)
+def test_apply_plan_rejects_cross_slot_contradiction_before_writes(
+    a_scope, b_scope
+):
+    db = IntegrityDB(
+        claims={
+            "a": {"id": graph_id("a"), "subject": a_scope[0], "predicate": a_scope[1]},
+            "b": {"id": graph_id("b"), "subject": b_scope[0], "predicate": b_scope[1]},
+        }
+    )
+    plan = _contradiction_plan([("a", "b")])
+
+    with pytest.raises(GraphIntegrityError, match="same subject and predicate"):
         GraphWriter(db).apply_plan(plan, "scenario")
 
     assert db.writes == []
