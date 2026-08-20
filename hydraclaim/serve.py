@@ -33,6 +33,11 @@ from hydraclaim.ratelimit import limiter
 DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "sessions"
 
 
+def _error(code: str, message: str) -> dict[str, str]:
+    """Build the stable error shape returned by HTTP endpoints."""
+    return {"code": code, "error": message}
+
+
 def llm_classifier(question: str) -> dict:
     """LLM question classification (grounded in the predicate vocabulary).
 
@@ -233,7 +238,7 @@ def _check_write_auth(headers: dict) -> tuple[int, dict] | None:
     auth = headers.get("authorization", "")
     if auth == f"Bearer {WRITE_KEY}":
         return None
-    return 401, {"error": "invalid or missing write key"}
+    return 401, _error("unauthorized", "invalid or missing write key")
 
 
 def dispatch(
@@ -268,10 +273,11 @@ def dispatch(
             )
             return (
                 429,
-                {
-                    "error": f"rate limit exceeded for {name}. "
-                    f"Try again in about {retry_after}s."
-                },
+                _error(
+                    "rate_limited",
+                    f"rate limit exceeded for {name}. "
+                    f"Try again in about {retry_after}s.",
+                ),
                 {"Retry-After": str(retry_after)},
             )
         return None
@@ -288,9 +294,17 @@ def dispatch(
     if method == "POST" and path == "/ask":
         question = (body.get("question") or "").strip()
         if not question:
-            return 400, {"error": "missing 'question' in request body"}, None
+            return (
+                400,
+                _error("invalid_request", "missing 'question' in request body"),
+                None,
+            )
         if len(question) > 300:
-            return 400, {"error": "question too long (max 300 chars)"}, None
+            return (
+                400,
+                _error("invalid_request", "question too long (max 300 chars)"),
+                None,
+            )
         blocked = _rate_limit("ask")
         if blocked:
             return blocked
@@ -298,15 +312,15 @@ def dispatch(
 
         try:
             return 200, handle_ask(question, db, llm_fn, classification_mode), None
-        except HydraDBError as exc:
-            return 502, {"error": f"graph backend failed: {exc}"}, None
+        except HydraDBError:
+            return 502, _error("graph_backend_failed", "graph backend failed"), None
     if method == "GET" and path == "/graph":
         from hydraclaim.db import HydraDBError
 
         try:
             return 200, handle_graph(db), None
-        except HydraDBError as exc:
-            return 502, {"error": f"graph backend failed: {exc}"}, None
+        except HydraDBError:
+            return 502, _error("graph_backend_failed", "graph backend failed"), None
     if method in ("POST",) and path in ("/ingest", "/ingest/slack"):
         auth_err = _check_write_auth(headers)
         if auth_err:
@@ -323,7 +337,7 @@ def dispatch(
 
         status, payload = handle_ingest_slack(body, db)
         return status, payload, None
-    return 404, {"error": f"unknown endpoint: {method} {path}"}, None
+    return 404, _error("not_found", f"unknown endpoint: {method} {path}"), None
 
 
 class DemoHandler(BaseHTTPRequestHandler):
@@ -347,7 +361,11 @@ class DemoHandler(BaseHTTPRequestHandler):
             if self.command == "POST":
                 length = int(self.headers.get("Content-Length") or 0)
                 if length > 500_000:  # hard cap on request bodies
-                    return 413, {"error": "request body too large"}, None
+                    return (
+                        413,
+                        _error("request_too_large", "request body too large"),
+                        None,
+                    )
                 body = json.loads(self.rfile.read(length) or b"{}")
             else:
                 body = {}
@@ -365,7 +383,7 @@ class DemoHandler(BaseHTTPRequestHandler):
                 classification_mode,
             )  # type: ignore[attr-defined]
         except json.JSONDecodeError:
-            return 400, {"error": "request body must be JSON"}, None
+            return 400, _error("invalid_json", "request body must be JSON"), None
 
     def do_GET(self) -> None:
         self._respond(*self._dispatch())

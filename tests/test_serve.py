@@ -49,7 +49,17 @@ def test_dispatch_health():
 def test_dispatch_unknown_endpoint():
     status, payload, _ = serve.dispatch("GET", "/nope", {}, None, None)
     assert status == 404
+    assert payload["code"] == "not_found"
     assert "unknown endpoint" in payload["error"]
+
+
+def test_dispatch_invalid_request_has_stable_error_code():
+    status, payload, _ = serve.dispatch("POST", "/ask", {}, None, None)
+    assert status == 400
+    assert payload == {
+        "code": "invalid_request",
+        "error": "missing 'question' in request body",
+    }
 
 
 def test_dispatch_ask_requires_question():
