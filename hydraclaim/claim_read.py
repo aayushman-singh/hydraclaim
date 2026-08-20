@@ -9,11 +9,15 @@ from __future__ import annotations
 import re
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from hydraclaim.cypher import to_cypher_literal as lit
 from hydraclaim.db import HydraDB
 from hydraclaim.model import split_aliases
 from hydraclaim.scoring import rank_claims
+
+if TYPE_CHECKING:
+    from hydraclaim.router import Classification
 
 
 @dataclass(frozen=True)
@@ -69,7 +73,7 @@ class AnswerResult:
     route: str
     text: str
     citations: tuple[Citation, ...]
-    classification: object
+    classification: Classification
     probe: ProbeResult | None
 
     def as_dict(self) -> dict:
@@ -116,8 +120,10 @@ class ClaimReader:
     def read_entities(self) -> tuple[dict, ...]:
         rows = self._db.query(
             "MATCH (e:Entity) RETURN e.id AS id, e.name AS name, "
-            "e.type AS type, e.aliases AS aliases"
+            "e.type AS type, e.aliases AS aliases "
+            "ORDER BY e.name ASC, e.id ASC"
         )
+        rows = sorted(rows, key=lambda row: (str(row["name"]), int(row.get("id", 0))))
         return tuple(
             {
                 "id": row.get("id"),
@@ -153,8 +159,16 @@ RETURN c.id AS id, c.key AS key, e.name AS subject, c.predicate AS predicate,
        ev.quote AS quote, ev.explicitness AS explicitness,
        ev.extraction_confidence AS extraction_confidence,
        s.kind AS source_kind, s.author AS author
-ORDER BY c.valid_from DESC
+ORDER BY c.valid_from DESC, c.id DESC
 LIMIT {int(scope.limit)}"""
+        )
+        rows = sorted(
+            rows,
+            key=lambda row: (
+                str(row["valid_from"]),
+                int(row.get("id", 0)),
+            ),
+            reverse=True,
         )
         return tuple(
             self._to_claim_view(row, scope, index) for index, row in enumerate(rows, 1)
@@ -202,8 +216,38 @@ MATCH (a:Claim){relation_match}(b:Claim)
      , (e:Entity)<-[:ABOUT]-(a:Claim)
 WHERE e.name = {lit(scope.subject)}{predicate_clause}
   AND a.id IN [{ids}] AND b.id IN [{ids}]
-RETURN {return_fields}"""
+RETURN {return_fields}
+ORDER BY a.id ASC, b.id ASC"""
         )
+        if relation_type == "SUPERSEDES":
+            rows = [
+                {
+                    "new_id": row.get("new_id", row.get("src")),
+                    "old_id": row.get("old_id", row.get("dst")),
+                }
+                for row in rows
+            ]
+            rows = [
+                row
+                for row in rows
+                if int(row["new_id"]) in claim_ids and int(row["old_id"]) in claim_ids
+            ]
+            rows.sort(key=lambda row: (int(row["new_id"]), int(row["old_id"])))
+        else:
+            rows = [
+                {
+                    "a_id": row.get("a_id", row.get("src")),
+                    "b_id": row.get("b_id", row.get("dst")),
+                    "resolved": row.get("resolved", False),
+                }
+                for row in rows
+            ]
+            rows = [
+                row
+                for row in rows
+                if int(row["a_id"]) in claim_ids and int(row["b_id"]) in claim_ids
+            ]
+            rows.sort(key=lambda row: (int(row["a_id"]), int(row["b_id"])))
         return tuple(rows)
 
     def read_chain(self, claim_id: int, scope: ClaimScope) -> tuple[dict, ...]:
@@ -213,12 +257,24 @@ RETURN {return_fields}"""
         rows = self._db.query(
             f"""
 MATCH p = (c:Claim {{id: {int(claim_id)}}})-[:SUPERSEDES*1..5]->(older:Claim)
+MATCH (c)-[:ABOUT]->(start_e:Entity)
 MATCH (older)-[:ABOUT]->(e:Entity)
-WHERE e.name = {lit(scope.subject)}{predicate_clause}
+WHERE c.id = {int(claim_id)}
+  AND start_e.name = {lit(scope.subject)}
+  AND e.name = {lit(scope.subject)}
+  AND c.predicate = older.predicate
+  {predicate_clause}
 RETURN older.id AS id, older.value AS value,
-       older.valid_from AS valid_from, older.valid_to AS valid_to"""
+       older.valid_from AS valid_from, older.valid_to AS valid_to
+ORDER BY older.valid_from DESC, older.id DESC"""
         )
-        return tuple(sorted(rows, key=lambda row: row["valid_from"], reverse=True))
+        return tuple(
+            sorted(
+                rows,
+                key=lambda row: (str(row["valid_from"]), int(row.get("id", 0))),
+                reverse=True,
+            )
+        )
 
     def probe(self, scope: ClaimScope) -> ProbeResult:
         claims = self.read_claims(
@@ -272,7 +328,6 @@ RETURN older.id AS id, older.value AS value,
         from hydraclaim.router import (
             ROUTE_ABSTAIN,
             ROUTE_FAST,
-            Classification,
             classify,
             decide_route,
         )
@@ -372,6 +427,15 @@ RETURN older.id AS id, older.value AS value,
                 classification.predicate or "",
                 now,
             )
+            ranked.sort(
+                key=lambda pair: (
+                    pair[1],
+                    str(pair[0]["valid_from"]),
+                    str(pair[0].get("key") or ""),
+                    int(pair[0].get("id", 0)),
+                ),
+                reverse=True,
+            )
             return AnswerResult(
                 route,
                 build_conflict_answer(
@@ -400,15 +464,31 @@ RETURN older.id AS id, older.value AS value,
         )
 
 
-def _citation(claim: ClaimView) -> Citation:
+def _citation(claim: ClaimView | dict) -> Citation:
+    if isinstance(claim, ClaimView):
+        claim_id = claim.key or claim.id
+        value = claim.value
+        valid_from = claim.valid_from
+        valid_to = claim.valid_to
+        source_kind = claim.source_kind
+        author = claim.author
+        quote = claim.quote
+    else:
+        claim_id = claim.get("key") or claim["id"]
+        value = claim["value"]
+        valid_from = claim["valid_from"]
+        valid_to = claim.get("valid_to")
+        source_kind = claim.get("source_kind")
+        author = claim.get("author")
+        quote = claim.get("quote")
     return Citation(
-        claim_id=claim.key or claim.id,
-        value=claim.value,
-        valid_from=claim.valid_from,
-        valid_to=claim.valid_to,
-        source_kind=claim.source_kind,
-        author=claim.author,
-        quote=claim.quote,
+        claim_id=claim_id,
+        value=value,
+        valid_from=valid_from,
+        valid_to=valid_to,
+        source_kind=source_kind,
+        author=author,
+        quote=quote,
     )
 
 
