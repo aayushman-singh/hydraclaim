@@ -62,6 +62,17 @@ def test_dispatch_invalid_request_has_stable_error_code():
     }
 
 
+@pytest.mark.parametrize("body", [[], None])
+def test_dispatch_rejects_non_object_ask_body(body):
+    status, payload, _ = serve.dispatch("POST", "/ask", body, FakeDB(), None)
+
+    assert status == 400
+    assert payload == {
+        "code": "invalid_request",
+        "error": "request body must be a JSON object",
+    }
+
+
 def test_dispatch_ingest_route_returns_stable_failure(monkeypatch):
     monkeypatch.setattr(serve, "WRITE_KEY", "")
     monkeypatch.setattr(
@@ -110,6 +121,87 @@ def test_dispatch_ask_returns_answer():
     assert status == 200
     assert payload["route"] == "FAST"
     assert payload["citations"][0]["claim_id"] == "c1"
+
+
+def test_dispatch_maps_llm_failure_and_logs_traceback(monkeypatch, caplog):
+    def broken(*args, **kwargs):
+        raise LLMError("provider unavailable")
+
+    monkeypatch.setattr(retrieve, "answer", broken)
+    with caplog.at_level("ERROR", logger="hydraclaim.serve"):
+        status, payload, _ = serve.dispatch(
+            "POST", "/ask", {"question": "Who owns payments?"}, FakeDB(), None
+        )
+
+    assert status == 502
+    assert payload == {
+        "code": "llm_failed",
+        "error": "language model request failed",
+    }
+    assert "endpoint=/ask" in caplog.text
+    assert "Traceback" in caplog.text
+
+
+def test_dispatch_maps_classifier_shape_failure(monkeypatch, caplog):
+    from hydraclaim.router import ClassificationError
+
+    def broken(*args, **kwargs):
+        raise ClassificationError("classifier returned an array")
+
+    monkeypatch.setattr(retrieve, "answer", broken)
+    with caplog.at_level("ERROR", logger="hydraclaim.serve"):
+        status, payload, _ = serve.dispatch(
+            "POST", "/ask", {"question": "Who owns payments?"}, FakeDB(), None
+        )
+
+    assert status == 502
+    assert payload == {
+        "code": "classifier_failed",
+        "error": "question classification failed",
+    }
+    assert "endpoint=/ask" in caplog.text
+    assert "Traceback" in caplog.text
+
+
+def test_dispatch_does_not_hide_unrecognized_programming_errors(monkeypatch):
+    def broken(*args, **kwargs):
+        raise ValueError("programming error")
+
+    monkeypatch.setattr(retrieve, "answer", broken)
+    with pytest.raises(ValueError, match="programming error"):
+        serve.dispatch(
+            "POST", "/ask", {"question": "Who owns payments?"}, FakeDB(), None
+        )
+
+
+def test_llm_suggestions_fail_without_heuristic_fallback(monkeypatch):
+    monkeypatch.setattr(
+        "hydraclaim.llm.chat_json", lambda messages: ["not", "an", "object"]
+    )
+
+    with pytest.raises(serve.SuggestionResponseError, match="suggestion response"):
+        serve.handle_suggestions(object(), suggestion_mode="llm")
+
+
+def test_dispatch_maps_llm_suggestion_failure(monkeypatch, caplog):
+    monkeypatch.setattr(
+        serve,
+        "handle_suggestions",
+        lambda *args, **kwargs: (_ for _ in ()).throw(LLMError("offline")),
+    )
+
+    with caplog.at_level("ERROR", logger="hydraclaim.serve"):
+        status, payload, _ = serve.dispatch(
+            "GET", "/suggestions", {}, FakeDB(), object(), suggestion_mode="llm"
+        )
+
+    assert status == 502
+    assert payload == {
+        "code": "llm_failed",
+        "error": "language model request failed",
+    }
+    assert "endpoint=/suggestions" in caplog.text
+    assert "Traceback" in caplog.text
 
 
 def test_llm_classifier_propagates_error(monkeypatch):

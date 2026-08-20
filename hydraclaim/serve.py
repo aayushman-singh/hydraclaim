@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -28,14 +29,39 @@ from typing import Any
 
 from hydraclaim import retrieve
 from hydraclaim.claim_read import ClaimReader, ClaimScope
+from hydraclaim.db import HydraDBError
+from hydraclaim.llm import LLMError
 from hydraclaim.ratelimit import limiter
+from hydraclaim.router import ClassificationError
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "sessions"
+logger = logging.getLogger(__name__)
 
 
 def _error(code: str, message: str) -> dict[str, str]:
     """Build the stable error shape returned by HTTP endpoints."""
     return {"code": code, "error": message}
+
+
+class SuggestionResponseError(ValueError):
+    """Raised when the suggestion LLM returns an invalid JSON shape."""
+
+
+def _request_context(method: str, path: str, body: object, mode: str) -> str:
+    """Return safe request context for remote-failure logs."""
+    fields = sorted(body) if isinstance(body, dict) else []
+    question = body.get("question") if isinstance(body, dict) else None
+    question_length = len(question) if isinstance(question, str) else None
+    return (
+        f"method={method} endpoint={path} mode={mode} body_type={type(body).__name__} "
+        f"fields={fields!r} question_length={question_length}"
+    )
+
+
+def _log_remote_failure(kind: str, context: str, exc: Exception) -> None:
+    logger.exception(
+        "%s failed %s exception_type=%s", kind, context, type(exc).__name__
+    )
 
 
 def llm_classifier(question: str) -> dict:
@@ -115,60 +141,74 @@ def _build_suggestion_payload(scenarios: list[dict]) -> dict[str, list[dict]]:
     }
 
 
-def handle_suggestions(llm_fn) -> dict[str, Any]:
+def handle_suggestions(llm_fn, *, suggestion_mode: str = "heuristic") -> dict[str, Any]:
     """Return 4 diverse demo questions (one per route), grounded in the data.
 
-    Uses the LLM to pick the clearest phrasing per route when available;
-    otherwise falls back to a deterministic selection.
+    The caller selects either deterministic heuristic selection or LLM selection.
+    An LLM response error stops the request.
     """
+    if suggestion_mode not in {"heuristic", "llm"}:
+        raise ValueError(f"unknown suggestion mode: {suggestion_mode!r}")
+
     scenarios = []
     for path in sorted(DATA_DIR.glob("*.json")):
         doc = json.loads(path.read_text(encoding="utf-8"))
         scenarios.append(doc)
 
     baseline = _build_suggestion_payload(scenarios)
-    if llm_fn is None or not baseline["suggestions"]:
+    if suggestion_mode == "heuristic" or not baseline["suggestions"]:
         return baseline
+    if llm_fn is None:
+        raise ValueError("llm suggestion mode requires llm_fn")
 
     from hydraclaim.llm import chat_json
 
     bucket_text = "\n".join(
         f"[{b['route']}] {b['text']}" for b in baseline["suggestions"]
     )
-    try:
-        result = chat_json(
-            [
-                {"role": "system", "content": _SUGGESTION_SYSTEM},
-                {
-                    "role": "user",
-                    "content": "Ground-truth questions by route:\n" + bucket_text,
-                },
-            ]
+    result = chat_json(
+        [
+            {"role": "system", "content": _SUGGESTION_SYSTEM},
+            {
+                "role": "user",
+                "content": "Ground-truth questions by route:\n" + bucket_text,
+            },
+        ]
+    )
+    if not isinstance(result, dict):
+        raise SuggestionResponseError(
+            f"suggestion response must be an object, got {type(result).__name__}"
         )
-        suggestions = result.get("suggestions", []) if isinstance(result, dict) else []
-        if (
-            suggestions
-            and len(suggestions) >= 1
-            and all(isinstance(s, dict) and s.get("route") for s in suggestions)
-        ):
-            seen = set()
-            deduped = []
-            for s in suggestions:
-                key = s.get("route")
-                if key in seen:
-                    continue
-                seen.add(key)
-                deduped.append({"text": str(s.get("text", "")), "route": str(key)})
-            if deduped:
-                return {"suggestions": deduped}
-    except Exception as exc:
-        print(
-            f"ERROR: suggestion generation failed — falling back to "
-            f"deterministic selection ({exc})",
-            file=sys.stderr,
-            flush=True,
+    suggestions = result.get("suggestions")
+    if not isinstance(suggestions, list) or not suggestions:
+        raise SuggestionResponseError(
+            "suggestion response must contain a non-empty list"
         )
-    return baseline
+
+    seen: set[str] = set()
+    deduped: list[dict[str, str]] = []
+    for index, suggestion in enumerate(suggestions):
+        if not isinstance(suggestion, dict):
+            raise SuggestionResponseError(
+                f"suggestion response item {index} must be an object"
+            )
+        text = suggestion.get("text")
+        route = suggestion.get("route")
+        if not isinstance(text, str) or not text.strip():
+            raise SuggestionResponseError(
+                f"suggestion response item {index} has invalid text"
+            )
+        if not isinstance(route, str) or route not in _QTYPE_TO_ROUTE.values():
+            raise SuggestionResponseError(
+                f"suggestion response item {index} has invalid route"
+            )
+        if route in seen:
+            continue
+        seen.add(route)
+        deduped.append({"text": text, "route": route})
+    if not deduped:
+        raise SuggestionResponseError("suggestion response has no unique routes")
+    return {"suggestions": deduped}
 
 
 def handle_graph(db) -> dict[str, Any]:
@@ -244,12 +284,13 @@ def _check_write_auth(headers: dict) -> tuple[int, dict] | None:
 def dispatch(
     method: str,
     path: str,
-    body: dict,
+    body: object,
     db,
     llm_fn,
     headers: dict | None = None,
     remote_addr: str | None = None,
     classification_mode: str = "heuristic",
+    suggestion_mode: str = "heuristic",
 ) -> tuple[int, dict, dict | None]:
     """Route a request to a handler. Returns (status, payload, extra_headers).
 
@@ -290,8 +331,44 @@ def dispatch(
         blocked = _rate_limit("suggestions")
         if blocked:
             return blocked
-        return 200, handle_suggestions(llm_fn), None
+        try:
+            return (
+                200,
+                handle_suggestions(llm_fn, suggestion_mode=suggestion_mode),
+                None,
+            )
+        except LLMError as exc:
+            _log_remote_failure(
+                "suggestions LLM",
+                _request_context(method, path, body, suggestion_mode),
+                exc,
+            )
+            return 502, _error("llm_failed", "language model request failed"), None
+        except SuggestionResponseError as exc:
+            _log_remote_failure(
+                "suggestions response",
+                _request_context(method, path, body, suggestion_mode),
+                exc,
+            )
+            return (
+                502,
+                _error("suggestions_failed", "suggestion generation failed"),
+                None,
+            )
     if method == "POST" and path == "/ask":
+        if not isinstance(body, dict):
+            return (
+                400,
+                _error("invalid_request", "request body must be a JSON object"),
+                None,
+            )
+        raw_question = body.get("question")
+        if raw_question is not None and not isinstance(raw_question, str):
+            return (
+                400,
+                _error("invalid_request", "'question' must be a string"),
+                None,
+            )
         question = (body.get("question") or "").strip()
         if not question:
             return (
@@ -308,18 +385,42 @@ def dispatch(
         blocked = _rate_limit("ask")
         if blocked:
             return blocked
-        from hydraclaim.db import HydraDBError
-
         try:
             return 200, handle_ask(question, db, llm_fn, classification_mode), None
-        except HydraDBError:
+        except LLMError as exc:
+            _log_remote_failure(
+                "ask LLM",
+                _request_context(method, path, body, classification_mode),
+                exc,
+            )
+            return 502, _error("llm_failed", "language model request failed"), None
+        except ClassificationError as exc:
+            _log_remote_failure(
+                "ask classifier",
+                _request_context(method, path, body, classification_mode),
+                exc,
+            )
+            return (
+                502,
+                _error("classifier_failed", "question classification failed"),
+                None,
+            )
+        except HydraDBError as exc:
+            _log_remote_failure(
+                "ask graph backend",
+                _request_context(method, path, body, classification_mode),
+                exc,
+            )
             return 502, _error("graph_backend_failed", "graph backend failed"), None
     if method == "GET" and path == "/graph":
-        from hydraclaim.db import HydraDBError
-
         try:
             return 200, handle_graph(db), None
-        except HydraDBError:
+        except HydraDBError as exc:
+            _log_remote_failure(
+                "graph backend",
+                _request_context(method, path, body, classification_mode),
+                exc,
+            )
             return 502, _error("graph_backend_failed", "graph backend failed"), None
     if method in ("POST",) and path in ("/ingest", "/ingest/slack"):
         auth_err = _check_write_auth(headers)
@@ -329,6 +430,12 @@ def dispatch(
         if blocked:
             return blocked
         if method == "POST" and path == "/ingest":
+            if not isinstance(body, dict):
+                return (
+                    400,
+                    _error("invalid_request", "request body must be a JSON object"),
+                    None,
+                )
             from hydraclaim.ingest_api import handle_ingest
 
             status, payload = handle_ingest(body, db)
@@ -357,6 +464,7 @@ class DemoHandler(BaseHTTPRequestHandler):
     def _dispatch(self) -> tuple[int, dict, dict | None]:
         llm_fn = self.server.llm_fn  # type: ignore[attr-defined]
         classification_mode = getattr(self.server, "classification_mode", "heuristic")
+        suggestion_mode = getattr(self.server, "suggestion_mode", "heuristic")
         try:
             if self.command == "POST":
                 length = int(self.headers.get("Content-Length") or 0)
@@ -381,6 +489,7 @@ class DemoHandler(BaseHTTPRequestHandler):
                 hdrs,
                 remote_addr,
                 classification_mode,
+                suggestion_mode,
             )  # type: ignore[attr-defined]
         except json.JSONDecodeError:
             return 400, _error("invalid_json", "request body must be JSON"), None
@@ -423,6 +532,7 @@ def main() -> None:
     server.db = db  # type: ignore[attr-defined]
     server.llm_fn = llm_fn  # type: ignore[attr-defined]
     server.classification_mode = classification_mode  # type: ignore[attr-defined]
+    server.suggestion_mode = classification_mode  # type: ignore[attr-defined]
     mode = f"{classification_mode} classification"
     print(f"hydraclaim.serve listening on http://{args.host}:{args.port} ({mode})")
     try:

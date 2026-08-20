@@ -28,6 +28,11 @@ ROUTE_FAST = "FAST"
 ROUTE_DEEP = "DEEP"
 ROUTE_ABSTAIN = "ABSTAIN"
 
+
+class ClassificationError(ValueError):
+    """Raised when an LLM classifier returns an invalid response shape."""
+
+
 QUESTION_TYPES = frozenset(
     {
         "lookup",
@@ -198,37 +203,39 @@ def _classify_with_llm(
     """
     raw = llm_fn(question)
     if not isinstance(raw, dict):
-        raise ValueError("classifier returned non-dict")
+        raise ClassificationError("classifier returned non-dict")
     missing = {"subject", "predicate", "question_type", "as_of"} - raw.keys()
     if missing:
-        raise ValueError(
+        raise ClassificationError(
             "classifier response missing fields: " + ", ".join(sorted(missing))
         )
 
     subject = raw["subject"]
     if subject is not None and (not isinstance(subject, str) or not subject.strip()):
-        raise ValueError("classifier response has invalid subject")
+        raise ClassificationError("classifier response has invalid subject")
 
     predicate = raw["predicate"]
     if predicate is not None and (
         not isinstance(predicate, str) or predicate not in PREDICATES
     ):
-        raise ValueError(f"classifier response has invalid predicate: {predicate!r}")
+        raise ClassificationError(
+            f"classifier response has invalid predicate: {predicate!r}"
+        )
 
     question_type = raw["question_type"]
     if not isinstance(question_type, str) or question_type not in QUESTION_TYPES:
-        raise ValueError(
+        raise ClassificationError(
             f"classifier response has invalid question_type: {question_type!r}"
         )
 
     as_of = raw["as_of"]
     if as_of is not None and (not isinstance(as_of, str) or not as_of.strip()):
-        raise ValueError("classifier response has invalid as_of")
+        raise ClassificationError("classifier response has invalid as_of")
     if as_of is not None:
         try:
             as_of = date.fromisoformat(as_of)
         except ValueError as exc:
-            raise ValueError(
+            raise ClassificationError(
                 f"classifier response has invalid as_of date {as_of!r}; "
                 "expected YYYY-MM-DD"
             ) from exc
