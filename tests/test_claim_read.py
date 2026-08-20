@@ -656,6 +656,14 @@ def test_chain_accepts_shared_ancestor_in_branching_dag():
     assert [row["id"] for row in chain] == [11, 12, 13]
 
 
+def test_chain_rejects_cycle_hidden_behind_a_shared_ancestor():
+    db = _BranchingChainDB()
+    db.edges[13] = (12,)
+
+    with pytest.raises(GraphIntegrityError, match="supersession cycle"):
+        ClaimReader(db).read_chain(10, ClaimScope("product launch", "deadline"))
+
+
 def test_chain_reads_raise_on_high_fanout_one_hop():
     db = _CrossScopeChainDB()
     with pytest.raises(

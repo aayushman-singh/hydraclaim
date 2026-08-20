@@ -351,13 +351,14 @@ LIMIT {int(scope.limit) + 1}"""
                 ]
             )
         scoped_rows = []
-        pending = [(int(claim_id), 0, frozenset({int(claim_id)}))]
+        pending = [(int(claim_id), 0)]
         seen_ids = {int(claim_id)}
         scheduled_ids = {int(claim_id)}
         expanded_ids: set[int] = set()
+        chain_edges: set[tuple[int, int]] = set()
         cursor = 0
         while cursor < len(pending):
-            current_id, current_depth, path = pending[cursor]
+            current_id, current_depth = pending[cursor]
             cursor += 1
             if current_id in expanded_ids:
                 continue
@@ -394,15 +395,12 @@ LIMIT {int(scope.limit) + 1}"""
             )
             for row in rows:
                 older_id = int(row["id"])
-                if older_id in path:
-                    raise GraphIntegrityError(
-                        "supersession cycle detected while reading claim chain"
-                    )
                 if row["predicate"] != start_predicate:
                     continue
                 older = self._read_claim_scope_membership(older_id, scope)
                 if older is None or older["predicate"] != start_predicate:
                     continue
+                chain_edges.add((current_id, older_id))
                 if older_id not in seen_ids:
                     scoped_rows.append(
                         {
@@ -422,8 +420,9 @@ LIMIT {int(scope.limit) + 1}"""
                             limit=scope.limit,
                         )
                 if older_id not in scheduled_ids:
-                    pending.append((older_id, current_depth + 1, path | {older_id}))
+                    pending.append((older_id, current_depth + 1))
                     scheduled_ids.add(older_id)
+        _chain_depth(chain_edges, seen_ids)
         return tuple(
             sorted(
                 scoped_rows,
