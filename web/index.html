@@ -48,6 +48,7 @@
       <div class="nav-links">
         <a href="#how">How it works</a>
         <a href="#bench">Benchmarks</a>
+        <a href="#install">Install</a>
         <a href="#" onclick="goView('ingest'); return false;">Ingest</a>
         <button class="nav-gh" onclick="goView('dashboard')">Open console</button>
       </div>
@@ -152,6 +153,38 @@
       The single router+probe miss is a subject/object inversion ("who works on X" vs "X is owned by who") — a documented
       vocabulary limitation, not a retrieval error.
     </p>
+  </section>
+
+  <section class="section install-section" id="install">
+    <div class="install-heading">
+      <div>
+        <div class="section-label">Use it from your tools</div>
+        <h2>One graph. Two interfaces.</h2>
+      </div>
+      <p>Use the command-line interface for direct work. Use the Model Context Protocol (MCP) server to give an AI agent the same cited claim memory.</p>
+    </div>
+    <div class="install-grid">
+      <article class="install-card">
+        <div class="install-card-head"><span>CLI</span><span class="install-state">direct</span></div>
+        <h3>Ask from a terminal</h3>
+        <pre><code>pip install hydraclaim
+hydraclaim ask "What is the launch date?"</code></pre>
+      </article>
+      <article class="install-card install-card-mcp">
+        <div class="install-card-head"><span>MCP</span><span class="install-state">agent</span></div>
+        <h3>Connect an AI client</h3>
+        <pre><code>pip install 'hydraclaim[mcp]'
+hydraclaim mcp</code></pre>
+        <p>Tools: <code>ask_claim</code> and <code>record_source_event</code></p>
+      </article>
+    </div>
+    <div class="agent-prompt-card">
+      <div class="agent-prompt-copy">
+        <span class="step-label">AGENT INSTALL REQUEST</span>
+        <p id="agent-install-prompt">Install HydraClaim MCP for this project. Run python -m pip install 'hydraclaim[mcp]'. Configure an MCP server named hydraclaim with the command hydraclaim and the argument mcp. Set HYDRADB_URL, HYDRADB_TOKEN, HYDRADB_NAMESPACE, HYDRADB_GRAPH, and HYDRADB_CELL. Ask me for missing values. Do not invent secrets. Verify the setup by listing the ask_claim and record_source_event tools.</p>
+      </div>
+      <button class="btn btn-primary copy-prompt" id="copy-agent-prompt" type="button">Copy agent prompt</button>
+    </div>
   </section>
 
   <footer>

@@ -820,6 +820,20 @@ const savedKey = localStorage.getItem("hydraclaim_write_key");
 if (savedKey) document.getElementById("ingest-key").value = savedKey;
 
 // ─── Init ───
+const copyAgentPrompt = document.getElementById("copy-agent-prompt");
+if (copyAgentPrompt) {
+  copyAgentPrompt.addEventListener("click", async () => {
+    const prompt = document.getElementById("agent-install-prompt").textContent.trim();
+    try {
+      await navigator.clipboard.writeText(prompt);
+      copyAgentPrompt.textContent = "Prompt copied";
+    } catch (error) {
+      copyAgentPrompt.textContent = "Copy failed";
+      console.error("Agent prompt copy failed", error);
+    }
+  });
+}
+
 checkHealth();
 loadSuggestions();
 loadGraph();
