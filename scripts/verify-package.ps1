@@ -18,8 +18,8 @@ if ($LASTEXITCODE -ne 0) {
     throw "The clean package build failed."
 }
 
-$expectedWheelName = "hydraclaim-0.2.0-py3-none-any.whl"
-$expectedSdistName = "hydraclaim-0.2.0.tar.gz"
+$expectedWheelName = "hydraclaim-0.3.0-py3-none-any.whl"
+$expectedSdistName = "hydraclaim-0.3.0.tar.gz"
 $expectedArtifactNames = @($expectedWheelName, $expectedSdistName) | Sort-Object
 $actualArtifactNames = @(
     Get-ChildItem -LiteralPath $distDir -File |
@@ -96,8 +96,8 @@ if (-not (Test-Path -LiteralPath $cli)) {
 }
 
 $version = (& $cli --version | Out-String).Trim()
-if ($LASTEXITCODE -ne 0 -or $version -ne "hydraclaim 0.2.0") {
-    throw "Expected 'hydraclaim 0.2.0' from the clean installation; got '$version'."
+if ($LASTEXITCODE -ne 0 -or $version -ne "hydraclaim 0.3.0") {
+    throw "Expected 'hydraclaim 0.3.0' from the clean installation; got '$version'."
 }
 Write-Output $version
 
@@ -204,4 +204,4 @@ finally {
     }
 }
 
-Write-Output "Clean HydraClaim 0.2.0 installation passed all CLI, fixture, and configuration checks."
+Write-Output "Clean HydraClaim 0.3.0 installation passed all CLI, fixture, and configuration checks."

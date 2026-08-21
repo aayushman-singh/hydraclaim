@@ -92,7 +92,7 @@ def test_dispatcher_has_exactly_the_public_commands() -> None:
 
 def test_root_version(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["--version"]) == 0
-    assert capsys.readouterr().out.strip() == "hydraclaim 0.2.0"
+    assert capsys.readouterr().out.strip() == "hydraclaim 0.3.0"
 
 
 def test_root_help_without_command(capsys: pytest.CaptureFixture[str]) -> None:

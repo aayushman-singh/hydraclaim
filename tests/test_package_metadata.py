@@ -31,7 +31,7 @@ def test_project_metadata_is_complete() -> None:
     project = metadata["project"]
 
     assert project["name"] == "hydraclaim"
-    assert project["version"] == "0.2.0"
+    assert project["version"] == "0.3.0"
     assert project["scripts"]["hydraclaim"] == "hydraclaim.cli:main"
     assert project["requires-python"] == ">=3.11"
     assert "Programming Language :: Python :: 3.12" in project["classifiers"]
@@ -61,8 +61,8 @@ def test_package_verifier_selects_only_the_release_wheel() -> None:
     text = (ROOT / "scripts" / "verify-package.ps1").read_text(encoding="utf-8")
 
     assert '$ErrorActionPreference = "Stop"' in text
-    assert '$expectedWheelName = "hydraclaim-0.2.0-py3-none-any.whl"' in text
-    assert '$expectedSdistName = "hydraclaim-0.2.0.tar.gz"' in text
+    assert '$expectedWheelName = "hydraclaim-0.3.0-py3-none-any.whl"' in text
+    assert '$expectedSdistName = "hydraclaim-0.3.0.tar.gz"' in text
     assert "$expectedArtifactNames" in text
     assert "$hostPython -m build" in text
     assert "$hostPython -m pytest tests/test_package_metadata.py" in text
@@ -190,14 +190,14 @@ def test_distribution_includes_schema_resource() -> None:
 def test_release_archives_exclude_local_and_generated_content() -> None:
     dist_dir = ROOT / "dist"
     expected_names = {
-        "hydraclaim-0.2.0-py3-none-any.whl",
-        "hydraclaim-0.2.0.tar.gz",
+        "hydraclaim-0.3.0-py3-none-any.whl",
+        "hydraclaim-0.3.0.tar.gz",
     }
     assert dist_dir.is_dir()
     actual_names = {path.name for path in dist_dir.iterdir() if path.is_file()}
     assert actual_names == expected_names
-    wheel_path = dist_dir / "hydraclaim-0.2.0-py3-none-any.whl"
-    sdist_path = dist_dir / "hydraclaim-0.2.0.tar.gz"
+    wheel_path = dist_dir / "hydraclaim-0.3.0-py3-none-any.whl"
+    sdist_path = dist_dir / "hydraclaim-0.3.0.tar.gz"
 
     with zipfile.ZipFile(wheel_path) as archive:
         wheel_names = archive.namelist()

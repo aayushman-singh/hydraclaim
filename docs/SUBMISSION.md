@@ -98,7 +98,7 @@ line, API, web demo, deployment, tests, and documentation.
 - Live application: https://hydraclaim.aayushman.dev
 - Public API: https://hydraclaim-api.aayushman.dev
 - Demo video: https://youtu.be/qa5agsQvzfA
-- Release: https://github.com/aayushman-singh/hydraclaim/releases/tag/v0.2.0
+- Release: https://github.com/aayushman-singh/hydraclaim/releases/tag/v0.3.0
 
 ## Video checklist
 
