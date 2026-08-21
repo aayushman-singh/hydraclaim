@@ -23,6 +23,7 @@ COMMAND_NAMES = (
     "process",
     "status",
     "events",
+    "mcp",
 )
 
 

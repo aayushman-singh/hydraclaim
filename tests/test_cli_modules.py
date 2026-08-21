@@ -23,6 +23,7 @@ COMMAND_MODULES = (
     "hydraclaim.process",
     "hydraclaim.status",
     "hydraclaim.events",
+    "hydraclaim.mcp_server",
 )
 
 

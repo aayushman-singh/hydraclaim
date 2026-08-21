@@ -144,10 +144,30 @@ hydraclaim events show source-event:slack:message-42
 attempt. Use `process --reprocess` to start a new attempt for an event that was
 already processed. Earlier attempts remain available through `events show`.
 
+### Connect an MCP client
+
+Install the optional Model Context Protocol (MCP) support:
+
+```bash
+pip install 'hydraclaim[mcp]'
+hydraclaim mcp
+```
+
+Configure the client to run `hydraclaim` with the `mcp` argument. Pass the same
+`HYDRADB_URL`, `HYDRADB_TOKEN`, `HYDRADB_NAMESPACE`, `HYDRADB_GRAPH`, and
+`HYDRADB_CELL` settings that the command-line interface uses.
+
+The server provides two tools:
+
+- `ask_claim` returns an answer, route, graph probe, and citations.
+- `record_source_event` saves exact source text before later extraction.
+
+The server uses standard input and output. It does not start a network service.
+It stops with an explicit MCP tool error when validation or a graph operation
+fails.
+
 ### Future scope
 
-- Add a Model Context Protocol (MCP) server with two tools: one tool records a
-  source event, and one tool asks a supported question.
 - Connect Codex, Claude Code, Cursor, and other MCP clients to the same claim
   graph.
 - Require explicit user setup before any transcript capture.

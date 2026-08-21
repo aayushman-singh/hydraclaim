@@ -32,6 +32,7 @@ COMMANDS = {
     "process": "hydraclaim.process",
     "status": "hydraclaim.status",
     "events": "hydraclaim.events",
+    "mcp": "hydraclaim.mcp_server",
 }
 
 logger = logging.getLogger(__name__)
