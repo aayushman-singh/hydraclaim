@@ -170,13 +170,6 @@ def _require_dict(value: object, name: str, errors: list[str]) -> dict:
     return value
 
 
-def _validate_scalar(value: object, name: str, errors: list[str]) -> None:
-    if not isinstance(value, (str, int, float, bool)) or (
-        isinstance(value, float) and not math.isfinite(value)
-    ):
-        errors.append(f"{name} must be a scalar")
-
-
 def _validate_non_empty_string(value: object, name: str, errors: list[str]) -> None:
     if not isinstance(value, str):
         errors.append(f"{name} must be a string")
