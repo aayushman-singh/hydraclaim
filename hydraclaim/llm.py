@@ -1,11 +1,8 @@
 """Minimal OpenAI-compatible chat client for the extraction LLM.
 
 Provider-agnostic: any endpoint exposing POST {base}/chat/completions works.
-Defaults target Moonshot/Kimi's international endpoint; users in China set
-LLM_BASE_URL=https://api.moonshot.cn/v1.
-
-Env: LLM_BASE_URL, LLM_MODEL (default kimi-k2), LLM_API_KEY (required).
-No network calls happen at import time; tests exercise only extract_json.
+Env: LLM_BASE_URL, LLM_MODEL and LLM_API_KEY must be explicitly configured.
+No network calls happen at import time.
 """
 
 from __future__ import annotations
@@ -17,16 +14,19 @@ from typing import Any
 
 import httpx
 
+from hydraclaim.config import ConfigurationError, require_settings
+
 
 class LLMError(RuntimeError):
     pass
 
 
 def _config() -> dict:
+    require_settings(llm=True)
     timeout = os.environ.get("LLM_TIMEOUT")
     return {
-        "base_url": os.environ.get("LLM_BASE_URL", "https://api.moonshot.ai/v1"),
-        "model": os.environ.get("LLM_MODEL", "kimi-k2"),
+        "base_url": os.environ["LLM_BASE_URL"].strip(),
+        "model": os.environ["LLM_MODEL"].strip(),
         "api_key": os.environ.get("LLM_API_KEY", ""),
         "timeout": float(timeout) if timeout else 600.0,
     }
@@ -64,10 +64,10 @@ def chat(
 ) -> str:
     try:
         cfg = _config()
+    except ConfigurationError as exc:
+        raise LLMError(str(exc)) from exc
     except (TypeError, ValueError) as exc:
         raise LLMError("LLM configuration is invalid") from exc
-    if not cfg["api_key"]:
-        raise LLMError("LLM_API_KEY is not set — export it before running extraction")
     payload: dict[str, Any] = {
         "model": model or cfg["model"],
         "messages": messages,

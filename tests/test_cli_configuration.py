@@ -81,3 +81,17 @@ def test_pipeline_reports_missing_llm_settings_before_connect(
 
     assert "LLM_API_KEY" in str(exc.value)
     assert capsys.readouterr().err == ""
+
+
+@pytest.mark.parametrize("setting", ["LLM_BASE_URL", "LLM_MODEL"])
+@pytest.mark.parametrize("value", [None, "", "   "])
+def test_extract_requires_explicit_endpoint_and_model(monkeypatch, setting, value):
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_BASE_URL", "https://endpoint.example/v1")
+    monkeypatch.setenv("LLM_MODEL", "test-model")
+    if value is None:
+        monkeypatch.delenv(setting)
+    else:
+        monkeypatch.setenv(setting, value)
+    with pytest.raises(config.ConfigurationError, match=setting):
+        extract.main(["does-not-exist.json"])

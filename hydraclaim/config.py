@@ -43,8 +43,10 @@ def require_settings(*, hydradb: bool = False, llm: bool = False) -> None:
         missing.extend(
             name for name, value in _hydradb_settings().items() if not value.strip()
         )
-    if llm and not os.environ.get("LLM_API_KEY", "").strip():
-        missing.append("LLM_API_KEY")
+    if llm:
+        missing.extend(
+            name for name in LLM_SETTING_NAMES if not os.environ.get(name, "").strip()
+        )
     if missing:
         raise ConfigurationError(
             "missing required settings: " + ", ".join(dict.fromkeys(missing))
@@ -61,13 +63,11 @@ def command_epilog(*, hydradb: bool = False, llm: str | None = None) -> str:
         )
     if llm == "required":
         lines.append(
-            "LLM settings: LLM_API_KEY is required; "
-            "LLM_BASE_URL and LLM_MODEL are optional."
+            "LLM settings: LLM_API_KEY, LLM_BASE_URL and LLM_MODEL are required."
         )
     elif llm == "optional":
         lines.append(
-            "LLM settings: --llm requires LLM_API_KEY; "
-            "LLM_BASE_URL and LLM_MODEL are optional. "
+            "LLM settings: --llm requires LLM_API_KEY, LLM_BASE_URL and LLM_MODEL. "
             "LLM_API_KEY alone does not select LLM mode."
         )
     return "\n".join(lines)

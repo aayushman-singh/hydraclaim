@@ -4,7 +4,7 @@
 #   bash demo/build-video.sh
 #
 # Requires: ffmpeg, docker (for the live HydraDB node), Python + PIL.
-# Set LLM_API_KEY (e.g. a local llama.cpp server) to include the live
+# Set LLM_API_KEY, LLM_BASE_URL and LLM_MODEL to include the live
 # extraction/evaluation section; without it that section is skipped.
 set -euo pipefail
 cd "$(dirname "$0")/.."

@@ -8,7 +8,7 @@ Endpoints:
   GET  /graph                 -> entity/claim nodes + edges for the graph view
   POST /ask {"question": str} -> retrieve.answer() result (route, answer,
                                  citations, classification, probe)
-  POST /ingest                -> LLM extract + reconcile + write (needs LLM_API_KEY)
+  POST /ingest                -> LLM extract + reconcile + write (needs LLM_API_KEY, LLM_BASE_URL, LLM_MODEL)
   POST /ingest/slack          -> Slack export -> sessions -> ingest pipeline
 
 Stdlib HTTP only — no new runtime dependencies. Question classification uses
@@ -32,8 +32,8 @@ from typing import Any
 from hydraclaim import retrieve
 from hydraclaim.claim_read import (
     DEFAULT_CLAIM_READ_LIMIT,
-    ClaimReadLimitError,
     ClaimReader,
+    ClaimReadLimitError,
     ClaimScope,
 )
 from hydraclaim.db import HydraDBError
@@ -664,7 +664,7 @@ def main(argv: Sequence[str] | None = None) -> int | None:
         "--llm",
         action="store_true",
         help="use the LLM for question classification "
-        "(requires LLM_API_KEY); default is the keyword heuristic",
+        "(requires LLM_API_KEY, LLM_BASE_URL and LLM_MODEL); default is the keyword heuristic",
     )
     args = parser.parse_args(argv)
 

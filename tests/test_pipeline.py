@@ -8,8 +8,8 @@ import sys
 import pytest
 
 from hydraclaim import cli, config, pipeline
-from hydraclaim.extract import parse_claims
 from hydraclaim.errors import PipelineInputError
+from hydraclaim.extract import parse_claims
 
 
 class _RecordingDB:
@@ -173,6 +173,8 @@ def test_pipeline_module_reports_expected_failure_without_traceback(tmp_path):
     scenario_path.write_text(json.dumps({"scenario_id": "missing-fields"}))
     environment = os.environ.copy()
     environment["LLM_API_KEY"] = "test-key"
+    environment["LLM_BASE_URL"] = "https://endpoint.example/v1"
+    environment["LLM_MODEL"] = "test-model"
 
     completed = subprocess.run(
         [sys.executable, "-m", "hydraclaim.pipeline", str(scenario_path)],

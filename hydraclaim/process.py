@@ -22,7 +22,7 @@ def process_event(db, event_key: str, *, reprocess: bool = False) -> dict:
     attempt = store.start_extraction(
         event_key,
         "openai-compatible",
-        os.environ.get("LLM_MODEL", "kimi-k2"),
+        os.environ.get("LLM_MODEL", ""),
         "extract-v1",
         reprocess=reprocess,
     )

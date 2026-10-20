@@ -5,7 +5,8 @@ plan the writes deterministically, apply them, then re-read active claims
 from the graph so the next session's prompt sees real graph ids.
 
 CLI: python -m hydraclaim.pipeline SCENARIO_JSON [...]
-Requires a live HydraDB node (scripts/dev-up.sh) and LLM_API_KEY.
+Requires a live HydraDB node (scripts/dev-up.sh) and explicit LLM_API_KEY,
+LLM_BASE_URL and LLM_MODEL settings.
 """
 
 from __future__ import annotations
@@ -17,12 +18,12 @@ import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
+from hydraclaim.claims import SOURCE_KINDS
 from hydraclaim.db import HydraDB
 from hydraclaim.errors import PipelineInputError
 from hydraclaim.extract import _parse_timestamp, extract_session
 from hydraclaim.graph_write import GraphWriter
 from hydraclaim.reconcile import plan_writes
-from hydraclaim.claims import SOURCE_KINDS
 from hydraclaim.source_events import SourceEventStore
 
 
@@ -176,7 +177,7 @@ def run_pipeline(
             attempt = event_store.start_extraction(
                 event_key,
                 "openai-compatible",
-                os.environ.get("LLM_MODEL", "kimi-k2"),
+                os.environ.get("LLM_MODEL", ""),
                 "extract-v1",
             )
             extraction_key = attempt["extraction_key"]

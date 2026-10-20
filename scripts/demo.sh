@@ -54,7 +54,7 @@ hydraclaim ask "What was the launch deadline before the most recent change?" --v
 header "Abstention: What is the payments integration's uptime SLA?"
 hydraclaim ask "What is the payments integration's uptime SLA?" --verbose
 
-banner "6. Optional live extraction evaluation (needs LLM_API_KEY)"
+banner "6. Optional live extraction evaluation (needs LLM_API_KEY, LLM_BASE_URL, LLM_MODEL)"
 if [ -n "${LLM_API_KEY:-}" ]; then
   hydraclaim extract data/sessions/deadline_drift.json \
     --emit /tmp/tg-drafts.json

@@ -105,17 +105,20 @@ The API sends `Access-Control-Allow-Origin: *`, so a plain site works.
 # Question classification uses the keyword heuristic by default.
 hydraclaim ask "What is the current launch deadline?" --verbose
 
-# LLM classification is explicit. Set the key and pass --llm.
+# LLM classification is explicit. Configure your endpoint and pass --llm.
 export LLM_API_KEY="your-key"
+export LLM_BASE_URL="https://your-endpoint.example/v1"
+export LLM_MODEL="your-model"
 hydraclaim ask --llm "What is the current launch deadline?" --verbose
 ```
 
-LLM_API_KEY alone never changes mode. LLM_BASE_URL and LLM_MODEL are
-optional LLM settings.
+LLM_API_KEY alone never changes mode. LLM_BASE_URL and LLM_MODEL must be
+explicitly configured for LLM calls. No provider or model is selected by default.
 
 ### Use the extraction pipeline
 
-Requires an LLM endpoint (`LLM_API_KEY`, optionally `LLM_BASE_URL` and `LLM_MODEL`):
+Requires an explicitly configured LLM endpoint (`LLM_API_KEY`, `LLM_BASE_URL` and
+`LLM_MODEL`, as shown above):
 
 ```bash
 # Extract claims and score them against ground truth

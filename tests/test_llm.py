@@ -1,7 +1,14 @@
-import pytest
 import httpx
+import pytest
 
 from hydraclaim.llm import LLMError, extract_json
+
+
+@pytest.fixture(autouse=True)
+def explicit_llm_config(monkeypatch):
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_BASE_URL", "https://endpoint.example/v1")
+    monkeypatch.setenv("LLM_MODEL", "test-model")
 
 
 def test_plain_object():
@@ -121,8 +128,9 @@ def test_chat_wraps_transport_errors(monkeypatch):
 
 
 def test_chat_wraps_json_decode_errors(monkeypatch):
-    from hydraclaim import llm
     import json
+
+    from hydraclaim import llm
 
     class FakeResponse:
         status_code = 200
@@ -146,3 +154,41 @@ def test_chat_wraps_json_decode_errors(monkeypatch):
 
     with pytest.raises(llm.LLMError, match="invalid JSON response"):
         llm.chat([{"role": "user", "content": "hi"}])
+
+
+@pytest.mark.parametrize("setting", ["LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL"])
+@pytest.mark.parametrize("value", [None, "", "   "])
+def test_chat_rejects_missing_settings_before_http(monkeypatch, setting, value):
+    from hydraclaim import llm
+
+    if value is None:
+        monkeypatch.delenv(setting, raising=False)
+    else:
+        monkeypatch.setenv(setting, value)
+    monkeypatch.setattr(
+        llm.httpx, "Client", lambda **kwargs: pytest.fail("HTTP must not start")
+    )
+    with pytest.raises(LLMError, match=setting):
+        llm.chat([{"role": "user", "content": "hi"}])
+
+
+def test_chat_uses_explicit_endpoint_and_model(monkeypatch):
+    from hydraclaim import llm
+
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    client_type = httpx.Client
+    transport = httpx.MockTransport(respond)
+    monkeypatch.setattr(
+        llm.httpx, "Client", lambda **kwargs: client_type(transport=transport, **kwargs)
+    )
+    assert llm.chat([{"role": "user", "content": "hi"}]) == "ok"
+    assert len(requests) == 1
+    assert str(requests[0].url) == "https://endpoint.example/v1/chat/completions"
+    import json
+
+    assert json.loads(requests[0].content)["model"] == "test-model"
