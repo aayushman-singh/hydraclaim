@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 from hydraclaim.extract import extract_session
 from hydraclaim.graph_write import GraphWriter
@@ -15,14 +15,22 @@ from hydraclaim.source_event_read import read_event
 from hydraclaim.source_events import SourceEventStore
 
 
-def process_event(db, event_key: str, *, reprocess: bool = False) -> dict:
+def process_event(
+    db,
+    event_key: str,
+    *,
+    extractor: Callable[[dict, list[dict], list[dict]], tuple[list[dict], list[str]]],
+    provider: str,
+    model: str,
+    reprocess: bool = False,
+) -> dict:
     """Run one explicit extraction attempt and stop at the first failed step."""
     source = read_event(db, event_key)["event"]
     store = SourceEventStore(db)
     attempt = store.start_extraction(
         event_key,
-        "openai-compatible",
-        os.environ.get("LLM_MODEL", ""),
+        provider,
+        model,
         "extract-v1",
         reprocess=reprocess,
     )
@@ -43,7 +51,7 @@ def process_event(db, event_key: str, *, reprocess: bool = False) -> dict:
     }
     active = fetch_active_claims(db)
     try:
-        drafts, _warnings = extract_session(session, [], active)
+        drafts, _warnings = extractor(session, [], active)
     except Exception as exc:
         store.fail_extraction(extraction_key, "EXTRACT", exc)
         raise
@@ -75,8 +83,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     from hydraclaim.config import connect, require_settings
 
     require_settings(hydradb=True, llm=True)
+    model = os.environ["LLM_MODEL"].strip()
     with connect() as db:
-        print(json.dumps(process_event(db, args.event_key, reprocess=args.reprocess)))
+        print(
+            json.dumps(
+                process_event(
+                    db,
+                    args.event_key,
+                    extractor=extract_session,
+                    provider="openai-compatible",
+                    model=model,
+                    reprocess=args.reprocess,
+                )
+            )
+        )
     return 0
 
 
