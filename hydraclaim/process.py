@@ -15,6 +15,43 @@ from hydraclaim.source_event_read import read_event
 from hydraclaim.source_events import SourceEventStore
 
 
+def _live_event_roster(author: object, active_claims: object) -> list[dict]:
+    if not isinstance(author, str) or not author.strip():
+        raise ValueError("source author must be a non-empty string")
+    if not isinstance(active_claims, list):
+        raise ValueError("active claims must be a list")
+
+    names_by_key: dict[str, str] = {}
+    names: list[str] = []
+
+    def add_active(name: object) -> None:
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("live event entity names must be non-empty strings")
+        normalized = name.strip()
+        key = normalized.lower()
+        existing = names_by_key.get(key)
+        if existing is not None and existing != normalized:
+            raise ValueError(
+                f"active claim subjects have ambiguous canonical spelling: {key!r}"
+            )
+        if existing is None:
+            names_by_key[key] = normalized
+            names.append(normalized)
+
+    for claim in active_claims:
+        if not isinstance(claim, dict):
+            raise ValueError("active claim must be an object")
+        add_active(claim.get("subject"))
+
+    author_name = author.strip()
+    author_key = author_name.lower()
+    if author_key not in names_by_key:
+        names_by_key[author_key] = author_name
+        names.append(author_name)
+
+    return [{"name": name, "type": "unknown", "aliases": []} for name in names]
+
+
 def process_event(
     db,
     event_key: str,
@@ -49,14 +86,24 @@ def process_event(
             }
         ],
     }
-    active = fetch_active_claims(db)
     try:
-        drafts, _warnings = extractor(session, [], active)
+        active = fetch_active_claims(db)
+        roster = _live_event_roster(source.get("author"), active)
+        drafts, warnings = extractor(session, roster, active)
+        if warnings:
+            raise RuntimeError(f"extractor warnings prevent claim write: {warnings!r}")
+        roster_names = {entity["name"] for entity in roster}
+        for index, draft in enumerate(drafts):
+            subject = draft.get("subject") if isinstance(draft, dict) else None
+            if not isinstance(subject, str) or subject not in roster_names:
+                raise ValueError(
+                    f"extracted claim {index} subject is not an exact roster name"
+                )
     except Exception as exc:
         store.fail_extraction(extraction_key, "EXTRACT", exc)
         raise
     try:
-        plan = plan_writes(drafts, active, [], id_prefix=event_key)
+        plan = plan_writes(drafts, active, roster, id_prefix=event_key)
     except Exception as exc:
         store.fail_extraction(extraction_key, "RECONCILE", exc)
         raise
@@ -64,7 +111,7 @@ def process_event(
         GraphWriter(db).apply_plan(
             plan,
             event_key,
-            [],
+            roster,
             extraction_key=extraction_key,
             source_event_keys={event_key: event_key},
         )
