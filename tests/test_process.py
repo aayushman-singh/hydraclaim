@@ -4,6 +4,8 @@ import pytest
 
 from hydraclaim import process
 from hydraclaim.extract import extract_session
+from hydraclaim.source_events import _content_hash
+from hydraclaim.subject_context import canonical_subject_context, subject_context_digest
 
 
 def _event():
@@ -25,9 +27,12 @@ class _Store:
         type(self).actions = self.actions
 
     def start_extraction(
-        self, event_key, provider, model, prompt_version, *, reprocess
+        self, event_key, provider, model, prompt_version, *, reprocess, **context_meta
     ):
-        self.actions.append(("start", event_key, provider, model, prompt_version))
+        action = ("start", event_key, provider, model, prompt_version)
+        if context_meta:
+            action += (context_meta,)
+        self.actions.append(action)
         return {"extraction_key": "event:extraction:1", "status": "RUNNING"}
 
     def fail_extraction(self, extraction_key, step, exc):
@@ -53,7 +58,7 @@ class _Writer:
 def _patch_process_dependencies(monkeypatch):
     _Store.actions = []
     _Writer.calls = []
-    monkeypatch.setattr(process, "read_event", lambda _db, _key: _event())
+    monkeypatch.setattr(process, "read_event", lambda _db, _key, **_kwargs: _event())
     monkeypatch.setattr(process, "SourceEventStore", _Store)
     monkeypatch.setattr(process, "fetch_active_claims", lambda _db: [])
     monkeypatch.setattr(
@@ -130,7 +135,7 @@ def test_process_event_passes_one_live_event_roster_through_all_stages(monkeypat
     ]
     event = _event()
     event["event"]["author"] = "asha rao"
-    monkeypatch.setattr(process, "read_event", lambda _db, _key: event)
+    monkeypatch.setattr(process, "read_event", lambda _db, _key, **_kwargs: event)
     monkeypatch.setattr(process, "fetch_active_claims", lambda _db: active)
     seen = {}
 
@@ -326,7 +331,7 @@ def test_process_event_records_invalid_roster_as_extraction_failure(
 ):
     event = _event()
     event["event"]["author"] = author
-    monkeypatch.setattr(process, "read_event", lambda _db, _key: event)
+    monkeypatch.setattr(process, "read_event", lambda _db, _key, **_kwargs: event)
     monkeypatch.setattr(process, "fetch_active_claims", lambda _db: active)
     called = []
 
@@ -361,6 +366,343 @@ def test_process_event_accepts_no_claims_when_roster_is_valid():
 
     assert result["status"] == "SUCCEEDED"
     assert _Store.actions[-1] == ("complete", "event:extraction:1", [])
+
+
+def _trusted_context(*, actor_ref="whatsapp:owner", role="user"):
+    messages = [
+        {
+            "msg_id": "q:42",
+            "ts": "2026-08-20T10:30:00+00:00",
+            "author": "Owner display",
+            "text": "I prefer tea.",
+            "source_actor_ref": "discord:42",
+            "actor_ref": actor_ref,
+            "role": role,
+        }
+    ]
+    if role == "user":
+        messages.append(
+            {
+                "msg_id": "r:9",
+                "ts": "2026-08-20T10:30:02+00:00",
+                "author": "Jarvis",
+                "text": "Tea is noted.",
+                "actor_ref": "jarvis:assistant",
+                "role": "assistant",
+            }
+        )
+    else:
+        messages[0]["ts"] = "2026-08-20T10:30:02+00:00"
+    return {
+        "version": 1,
+        "producer": "jarvis-recorder",
+        "subjects": [
+            {
+                "actor_ref": "whatsapp:owner",
+                "name": "owner",
+                "aliases": ["owner"],
+                "type": "unknown",
+            }
+        ],
+        "messages": messages,
+    }
+
+
+def _context_event(context):
+    event = _event()["event"]
+    event["author"] = "Conversation"
+    event["occurred_at"] = max(message["ts"] for message in context["messages"])
+    event["content"] = "\n".join(
+        f"{message['author']}: {message['text']}" for message in context["messages"]
+    )
+    event["subject_context"] = context
+    event["subject_context_digest"] = subject_context_digest(context)
+    event["content_hash"] = _content_hash(event)
+    return {"event": event}
+
+
+def _context_draft(msg_id="q:42", author="Owner display"):
+    return {
+        "id": "draft-1",
+        "subject": "owner",
+        "predicate": "likes",
+        "value": "tea",
+        "valid_from": "2026-08-20",
+        "quote": "I prefer tea.",
+        "author": author,
+        "source_kind": "slack",
+        "session_id": "event",
+        "msg_id": msg_id,
+        "explicitness": 1.0,
+        "confidence": 1.0,
+        "supersedes": None,
+    }
+
+
+def test_context_event_preserves_structured_messages_and_private_provenance(
+    monkeypatch,
+):
+    event = _context_event(_trusted_context())
+    monkeypatch.setattr(process, "read_event", lambda _db, _key, **_kwargs: event)
+    seen = {}
+
+    def extractor(session, roster, _active):
+        seen["session"] = session
+        seen["roster"] = roster
+        return [_context_draft()], []
+
+    def plan_writes(_drafts, _active, roster, *, id_prefix):
+        seen["plan_roster"] = roster
+        seen["id_prefix"] = id_prefix
+        return {"create": [{"id": "draft-1"}]}
+
+    monkeypatch.setattr(process, "plan_writes", plan_writes)
+
+    process.process_event(
+        object(),
+        "event",
+        extractor=extractor,
+        provider="jarvis-codex",
+        model="codex-test",
+    )
+
+    messages = seen["session"]["messages"]
+    assert [(m["msg_id"], m["role"], m["eligible"]) for m in messages] == [
+        ("q:42", "user", True),
+        ("r:9", "assistant", False),
+    ]
+    assert messages[0]["speaker_name"] == "owner"
+    assert messages[1]["speaker_name"] == "assistant"
+    assert all("actor_ref" not in message for message in messages)
+    assert seen["roster"] == [
+        {"name": "owner", "type": "unknown", "aliases": ["owner"]}
+    ]
+    assert seen["plan_roster"] is seen["roster"]
+    assert seen["id_prefix"] == "event"
+    assert _Writer.calls[0][0][2] is seen["roster"]
+    assert _Store.actions[0][-1] == {
+        "subject_context_digest": subject_context_digest(_trusted_context()),
+        "subject_context_provenance": "captured",
+    }
+
+
+def test_context_roster_keeps_existing_graph_canonical_spelling():
+    roster, names = process._subject_context_roster(
+        _trusted_context(), [{"subject": "Owner"}]
+    )
+
+    assert roster == [{"name": "Owner", "type": "unknown", "aliases": ["owner"]}]
+    assert names["whatsapp:owner"] == "Owner"
+
+
+@pytest.mark.parametrize(
+    "role,actor_ref", [("assistant", "jarvis:assistant"), ("user", "discord:42")]
+)
+def test_context_claim_from_assistant_or_unbound_user_fails_before_write(
+    monkeypatch, role, actor_ref
+):
+    context = _trusted_context(actor_ref=actor_ref, role=role)
+    event = _context_event(context)
+    monkeypatch.setattr(process, "read_event", lambda _db, _key, **_kwargs: event)
+    called = []
+
+    expected_error = (
+        "unbound user actor" if role == "user" else "eligible verified user message"
+    )
+    with pytest.raises(ValueError, match=expected_error):
+        process.process_event(
+            object(),
+            "event",
+            extractor=lambda *_args: (
+                called.append("extract") or [_context_draft()],
+                [],
+            ),
+            provider="jarvis-codex",
+            model="codex-test",
+        )
+
+    assert called == ([] if role == "user" else ["extract"])
+    assert _Writer.calls == []
+    assert _Store.actions[-1][:3] == ("fail", "event:extraction:1", "EXTRACT")
+
+
+def test_unbound_user_fails_before_extractor_even_when_model_would_return_no_claims(
+    monkeypatch,
+):
+    event = _context_event(_trusted_context(actor_ref="discord:42"))
+    monkeypatch.setattr(process, "read_event", lambda _db, _key, **_kwargs: event)
+    called = []
+
+    with pytest.raises(ValueError, match="unbound user actor"):
+        process.process_event(
+            object(),
+            "event",
+            extractor=lambda *_args: called.append("extract") or ([], []),
+            provider="jarvis-codex",
+            model="codex-test",
+        )
+
+    assert called == []
+    assert _Writer.calls == []
+    assert _Store.actions[-1][:3] == ("fail", "event:extraction:1", "EXTRACT")
+
+
+def test_context_event_allows_assistant_only_no_claims(monkeypatch):
+    context = _trusted_context(role="assistant")
+    event = _context_event(context)
+    monkeypatch.setattr(process, "read_event", lambda _db, _key, **_kwargs: event)
+
+    result = process.process_event(
+        object(),
+        "event",
+        extractor=lambda *_args: ([], []),
+        provider="jarvis-codex",
+        model="codex-test",
+    )
+
+    assert result["status"] == "SUCCEEDED"
+    assert _Writer.calls[0][0][0]["create"] == []
+
+
+def test_explicit_old_event_context_records_operator_attestation(monkeypatch):
+    context = _trusted_context()
+    source = _context_event(context)["event"]
+    source.pop("subject_context")
+    source.pop("subject_context_digest")
+    monkeypatch.setattr(
+        process, "read_event", lambda _db, _key, **_kwargs: {"event": source}
+    )
+
+    result = process.process_event(
+        object(),
+        "event",
+        extractor=lambda *_args: ([], []),
+        provider="jarvis-codex",
+        model="codex-test",
+        subject_context=context,
+    )
+
+    assert result["status"] == "SUCCEEDED"
+    assert _Store.actions[0][-1]["subject_context_provenance"] == "operator_attestation"
+    assert _Store.actions[0][-1]["subject_context_digest"]
+    assert _Store.actions[0][-1]["subject_context_json"] == canonical_subject_context(
+        context
+    )
+
+
+def test_explicit_context_cannot_replace_captured_binding(monkeypatch):
+    event = _context_event(_trusted_context())
+    monkeypatch.setattr(process, "read_event", lambda _db, _key, **_kwargs: event)
+
+    with pytest.raises(ValueError, match="cannot replace captured"):
+        process.process_event(
+            object(),
+            "event",
+            extractor=lambda *_args: ([], []),
+            provider="jarvis-codex",
+            model="codex-test",
+            subject_context=_trusted_context(actor_ref="whatsapp:other"),
+        )
+
+    assert _Store.actions[-1][:3] == ("fail", "event:extraction:1", "EXTRACT")
+    assert _Writer.calls == []
+
+
+def test_invalid_captured_context_fails_recorded_extract_before_model(monkeypatch):
+    event = _context_event(_trusted_context())
+    event["event"]["subject_context"]["messages"][0]["actor_ref"] = ""
+    monkeypatch.setattr(process, "read_event", lambda _db, _key, **_kwargs: event)
+    called = []
+
+    with pytest.raises(ValueError, match="actor_ref"):
+        process.process_event(
+            object(),
+            "event",
+            extractor=lambda *_args: called.append("extract") or ([], []),
+            provider="jarvis-codex",
+            model="codex-test",
+        )
+
+    assert called == []
+    assert _Writer.calls == []
+    assert _Store.actions[-1][:3] == ("fail", "event:extraction:1", "EXTRACT")
+
+
+@pytest.mark.parametrize("stored_context", [None, False, 0, ""])
+def test_corrupt_present_context_cannot_select_legacy_extraction(
+    monkeypatch, stored_context
+):
+    source = _event()["event"]
+    source.update(
+        subject_context=stored_context,
+        subject_context_present=True,
+        subject_context_digest="stored-digest",
+    )
+    monkeypatch.setattr(
+        process, "read_event", lambda _db, _key, **_kwargs: {"event": source}
+    )
+    called = []
+
+    with pytest.raises(ValueError, match="subject_context|captured"):
+        process.process_event(
+            object(),
+            "event",
+            extractor=lambda *_args: called.append("extract") or ([], []),
+            provider="jarvis-codex",
+            model="codex-test",
+        )
+
+    assert called == []
+    assert _Writer.calls == []
+    assert _Store.actions[0][-1]["subject_context_digest"] == "stored-digest"
+    assert _Store.actions[-1][:3] == ("fail", "event:extraction:1", "EXTRACT")
+
+
+def test_context_digest_without_context_json_fails_after_recording_attempt(
+    monkeypatch,
+):
+    source = _event()["event"]
+    source.update(subject_context_present=True, subject_context_digest="stored-digest")
+    monkeypatch.setattr(
+        process, "read_event", lambda _db, _key, **_kwargs: {"event": source}
+    )
+    called = []
+
+    with pytest.raises(ValueError, match="subject_context|captured"):
+        process.process_event(
+            object(),
+            "event",
+            extractor=lambda *_args: called.append("extract") or ([], []),
+            provider="jarvis-codex",
+            model="codex-test",
+        )
+
+    assert called == []
+    assert _Store.actions[0][-1]["subject_context_digest"] == "stored-digest"
+    assert _Store.actions[-1][:3] == ("fail", "event:extraction:1", "EXTRACT")
+
+
+@pytest.mark.parametrize("missing_field", ["subject_context_digest", "content_hash"])
+def test_captured_context_requires_digest_and_source_hash(monkeypatch, missing_field):
+    source = _context_event(_trusted_context())["event"]
+    source.pop(missing_field)
+    monkeypatch.setattr(
+        process, "read_event", lambda _db, _key, **_kwargs: {"event": source}
+    )
+    called = []
+
+    with pytest.raises(ValueError, match="integrity check"):
+        process.process_event(
+            object(),
+            "event",
+            extractor=lambda *_args: called.append("extract") or ([], []),
+            provider="jarvis-codex",
+            model="codex-test",
+        )
+
+    assert called == []
+    assert _Writer.calls == []
+    assert _Store.actions[-1][:3] == ("fail", "event:extraction:1", "EXTRACT")
 
 
 def test_process_cli_passes_configured_extractor_provider_and_model(

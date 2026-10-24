@@ -156,6 +156,87 @@ def test_empty_claims_list():
     assert drafts == [] and warnings == []
 
 
+def _trusted_session(*, role="user", eligible=True):
+    return {
+        "session_id": "captured-event",
+        "started_at": "2026-08-20T10:30:00+00:00",
+        "trusted_subject_context": True,
+        "messages": [
+            {
+                "msg_id": "q:42",
+                "ts": "2026-08-20T10:30:00+00:00",
+                "author": "Owner display",
+                "speaker_name": "owner" if eligible else "unresolved user",
+                "role": role,
+                "eligible": eligible,
+                "source_kind": "slack",
+                "channel": "captured",
+                "text": "I prefer tea.",
+            }
+        ],
+    }
+
+
+def _trusted_response(author="owner"):
+    return {
+        "claims": [
+            {
+                "subject": "owner",
+                "predicate": "prefers",
+                "value": "tea",
+                "valid_from": "2026-08-20",
+                "quote": "I prefer tea.",
+                "author": author,
+                "source_kind": "slack",
+                "session_id": "captured-event",
+                "msg_id": "q:42",
+                "explicitness": 1.0,
+                "confidence": 1.0,
+                "supersedes": None,
+            }
+        ]
+    }
+
+
+def test_context_prompt_uses_canonical_speakers_and_hides_private_refs():
+    session = _trusted_session()
+    session["messages"][0]["source_actor_ref"] = "discord:raw-id"
+    session["messages"][0]["actor_ref"] = "whatsapp:owner"
+
+    prompt = "\n".join(
+        message["content"]
+        for message in build_messages(
+            session, [{"name": "owner", "type": "unknown", "aliases": ["owner"]}], []
+        )
+    )
+
+    assert "owner (user; source author=Owner display; eligible=true" in prompt
+    assert "discord:raw-id" not in prompt
+    assert "whatsapp:owner" not in prompt
+    assert "source author=Owner display" in prompt
+
+
+def test_context_claim_maps_canonical_model_author_to_source_author():
+    drafts, warnings = parse_claims(
+        _trusted_response(author="Owner display"), _trusted_session()
+    )
+
+    assert warnings == []
+    assert drafts[0]["author"] == "Owner display"
+
+
+@pytest.mark.parametrize(
+    "session",
+    [
+        _trusted_session(role="assistant", eligible=False),
+        _trusted_session(role="user", eligible=False),
+    ],
+)
+def test_context_parser_rejects_assistant_and_unbound_evidence(session):
+    with pytest.raises(ValueError, match="not eligible"):
+        parse_claims(_trusted_response(author="Owner display"), session)
+
+
 @pytest.mark.parametrize("response", [None, [], {"claims": "not-a-list"}])
 def test_rejects_malformed_extraction_root(response):
     with pytest.raises(ValueError, match="claims|root"):

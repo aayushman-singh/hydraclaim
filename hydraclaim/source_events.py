@@ -10,9 +10,15 @@ from typing import Any
 from hydraclaim.claims import SOURCE_KINDS
 from hydraclaim.cypher import to_cypher_literal as lit
 from hydraclaim.model import graph_id, source_event_props
+from hydraclaim.subject_context import (
+    canonical_subject_context,
+    validate_subject_context_source,
+)
 
 
-_FIELDS = frozenset({"source_kind", "author", "occurred_at", "content", "source_id"})
+_FIELDS = frozenset(
+    {"source_kind", "author", "occurred_at", "content", "source_id", "subject_context"}
+)
 
 
 def validate_source_event(value: object) -> dict:
@@ -41,22 +47,42 @@ def validate_source_event(value: object) -> dict:
             datetime.fromisoformat(occurred_at.replace("Z", "+00:00"))
         except ValueError:
             errors.append("occurred_at must be a valid ISO timestamp")
+    if "subject_context" in value:
+        try:
+            value = dict(value)
+            value["subject_context"] = validate_subject_context_source(
+                value["subject_context"], value
+            )
+        except ValueError as exc:
+            errors.append(str(exc))
     if errors:
         raise ValueError("invalid source event: " + "; ".join(errors))
     return dict(value)
 
 
-def _content_hash(event: dict) -> str:
+def _base_content_hash(event: dict) -> str:
     text = "\x1f".join(
         (event["source_kind"], event["author"], event["occurred_at"], event["content"])
     )
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def _content_hash(event: dict) -> str:
+    base = _base_content_hash(event)
+    if "subject_context" in event:
+        text = (
+            base
+            + "\x1fsubject-context:"
+            + canonical_subject_context(event["subject_context"])
+        )
+        return hashlib.sha256(text.encode("utf-8")).hexdigest()
+    return base
+
+
 def source_event_key(event: dict) -> str:
     """Return the stable external key for one validated source event."""
     checked = validate_source_event(event)
-    identity = checked.get("source_id") or _content_hash(checked)
+    identity = checked.get("source_id") or _base_content_hash(checked)
     return f"source-event:{checked['source_kind']}:{identity}"
 
 
@@ -84,6 +110,14 @@ class SourceEventStore:
             f"MATCH (event:SourceEvent {{id: {node_id}}}) RETURN count(*) AS c"
         )
         if existing and existing.get("c", 0):
+            prior = self._db.query_one(
+                f"MATCH (event:SourceEvent {{id: {node_id}}}) "
+                "RETURN event.content_hash AS content_hash"
+            )
+            if not prior or prior.get("content_hash") != _content_hash(checked):
+                raise ValueError(
+                    "source key already exists with conflicting content or subject context"
+                )
             return {"event_key": key, "status": "CAPTURED", "created": False}
         captured_at = datetime.now(timezone.utc).isoformat()
         properties = source_event_props(
@@ -103,6 +137,9 @@ class SourceEventStore:
         prompt_version: str,
         *,
         reprocess: bool = False,
+        subject_context_digest: str | None = None,
+        subject_context_provenance: str | None = None,
+        subject_context_json: str | None = None,
     ) -> dict:
         """Create one explicit processing attempt for an accepted event."""
         for name, value in (
@@ -113,6 +150,10 @@ class SourceEventStore:
         ):
             if not isinstance(value, str) or not value.strip():
                 raise ValueError(f"{name} must be a non-empty string")
+        if subject_context_json is not None and (
+            not isinstance(subject_context_json, str) or not subject_context_json
+        ):
+            raise ValueError("subject_context_json must be a non-empty string")
         event_id = graph_id(event_key)
         event = self._db.query_one(
             f"MATCH (event:SourceEvent {{id: {event_id}}}) "
@@ -140,6 +181,12 @@ class SourceEventStore:
             "finished_at": "",
             "status": "RUNNING",
         }
+        if subject_context_digest is not None:
+            properties["subject_context_digest"] = subject_context_digest
+        if subject_context_provenance is not None:
+            properties["subject_context_provenance"] = subject_context_provenance
+        if subject_context_json is not None:
+            properties["subject_context_json"] = subject_context_json
         self._db.query(
             f"CREATE (extraction:Extraction {_props(properties)})-[:READ_FROM]->"
             f"(event:SourceEvent {{id: {event_id}}})"

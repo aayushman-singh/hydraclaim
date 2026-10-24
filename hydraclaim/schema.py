@@ -34,9 +34,12 @@ _SCHEMA_REFERENCE = """// HydraClaim graph model on HydraDB (documentation + can
 //             extraction_confidence, explicitness})
 // (:Source   {id, kind, author, channel})                    // kind: slack | linear | meeting
 // (:SourceEvent {id, key, source_kind, author, occurred_at, captured_at,
-//                content, content_hash, status, ingestion_kind})
+//                content, content_hash, status, ingestion_kind,
+//                subject_context_json, subject_context_digest})
 // (:Extraction {id, key, provider, model, prompt_version,
-//               started_at, finished_at, status})
+//               started_at, finished_at, status,
+//               subject_context_json, subject_context_digest,
+//               subject_context_provenance})
 // (:FailureRecord {id, key, step, error_type, message, traceback, failed_at})
 //
 // Edges

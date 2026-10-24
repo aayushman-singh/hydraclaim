@@ -99,7 +99,7 @@ def source_event_props(
     event: dict, key: str, captured_at: str, content_hash: str
 ) -> dict:
     """Return scalar properties for one accepted source event."""
-    return {
+    properties = {
         "id": graph_id(key),
         "key": key,
         "source_kind": event["source_kind"],
@@ -110,3 +110,16 @@ def source_event_props(
         "content_hash": content_hash,
         "status": "CAPTURED",
     }
+    if "subject_context" in event:
+        from hydraclaim.subject_context import (
+            canonical_subject_context,
+            subject_context_digest,
+        )
+
+        properties["subject_context_json"] = canonical_subject_context(
+            event["subject_context"]
+        )
+        properties["subject_context_digest"] = subject_context_digest(
+            event["subject_context"]
+        )
+    return properties

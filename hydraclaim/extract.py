@@ -143,11 +143,27 @@ def build_messages(
         )
         or "  (none)"
     )
-    message_lines = "\n".join(
-        f"[{m['msg_id']}] {m['ts']} {m['author']} ({m['source_kind']}, {m['channel']}): {m['text']}"
-        for m in session["messages"]
-    )
+    if session.get("trusted_subject_context"):
+        message_lines = "\n".join(
+            f"[{m['msg_id']}] {m['ts']} {m['speaker_name']} "
+            f"({m['role']}; source author={m['author']}; "
+            f"eligible={str(m['eligible']).lower()}, "
+            f"{m['source_kind']}, {m['channel']}): {m['text']}"
+            for m in session["messages"]
+        )
+    else:
+        message_lines = "\n".join(
+            f"[{m['msg_id']}] {m['ts']} {m['author']} ({m['source_kind']}, {m['channel']}): {m['text']}"
+            for m in session["messages"]
+        )
 
+    context_rules = (
+        "- In trusted subject context, claim author must copy the exact source author label shown for that message.\n"
+        "- Use the canonical speaker name for subject selection. The source author label does not establish identity.\n"
+        "- Use only messages marked eligible=true as evidence. Never use assistant or unresolved user messages.\n"
+        if session.get("trusted_subject_context")
+        else ""
+    )
     system = f"""You extract structured memory claims from chat logs for an agent memory system.
 
 Rules:
@@ -169,6 +185,7 @@ Rules:
 - Extract status claims when a message says a project/person is
   "on track", "at risk", "blocked", "complete", "delayed", "green", or "red".
 - Never invent information. If nothing qualifies, return {{"claims": []}}.
+{context_rules}
 
 Respond with strict JSON only, shape:
 {{"claims": [{{"subject", "predicate", "value", "valid_from", "quote", "author",
@@ -249,8 +266,11 @@ def parse_claims(
             raise ValueError(f"{where}: source_kind does not match message")
         if not isinstance(raw["author"], str) or not raw["author"].strip():
             raise ValueError(f"{where}: author must be a non-empty string")
-        if raw["author"] != msg["author"]:
+        expected_author = msg["author"]
+        if raw["author"] != expected_author:
             raise ValueError(f"{where}: author does not match message")
+        if session.get("trusted_subject_context") and not msg.get("eligible"):
+            raise ValueError(f"{where}: source message is not eligible claim evidence")
         quote = raw.get("quote")
         if not isinstance(quote, str) or not quote or quote not in msg["text"]:
             raise ValueError(f"{where}: quote not found verbatim in {msg['msg_id']}")
@@ -285,7 +305,7 @@ def parse_claims(
                 "value": value,
                 "valid_from": valid_from,
                 "quote": quote,
-                "author": raw["author"],
+                "author": msg["author"],
                 "source_kind": raw["source_kind"],
                 "session_id": session["session_id"],
                 "msg_id": msg["msg_id"],

@@ -1,6 +1,10 @@
+import json
+
 import pytest
 
 from hydraclaim.source_event_read import event_status, list_events, read_event
+from hydraclaim.source_events import _content_hash
+from hydraclaim.subject_context import subject_context_digest
 
 
 class ReadDB:
@@ -45,6 +49,92 @@ def test_read_event_selects_identifier_before_related_nodes():
 def test_read_event_fails_for_unknown_identifier():
     with pytest.raises(ValueError, match="not found"):
         read_event(ReadDB([[]]), "missing")
+
+
+def test_read_event_hides_actor_references_unless_operator_requests_them():
+    context = {
+        "version": 1,
+        "producer": "jarvis-recorder",
+        "subjects": [
+            {
+                "actor_ref": "whatsapp:owner",
+                "name": "owner",
+                "aliases": ["owner"],
+                "type": "unknown",
+            }
+        ],
+        "messages": [
+            {
+                "msg_id": "q:42",
+                "ts": "2026-08-20T10:30:00+00:00",
+                "author": "Owner display",
+                "text": "I prefer tea.",
+                "source_actor_ref": "discord:42",
+                "actor_ref": "whatsapp:owner",
+                "role": "user",
+            }
+        ],
+    }
+    event = {
+        "key": "event",
+        "source_kind": "slack",
+        "author": "Conversation",
+        "occurred_at": "2026-08-20T10:30:00+00:00",
+        "content": "Owner display: I prefer tea.",
+        "subject_context_json": json.dumps(context),
+        "subject_context_digest": subject_context_digest(context),
+    }
+    event["content_hash"] = _content_hash({**event, "subject_context": context})
+    public = read_event(ReadDB([[event], [], [], []]), "event")
+    private = read_event(
+        ReadDB([[event], [], [], []]), "event", include_private_context=True
+    )
+
+    assert "actor_ref" not in public["event"]["subject_context"]["subjects"][0]
+    assert "source_actor_ref" not in public["event"]["subject_context"]["messages"][0]
+    assert public["event"]["subject_context"]["messages"][0]["role"] == "user"
+    assert (
+        private["event"]["subject_context"]["subjects"][0]["actor_ref"]
+        == "whatsapp:owner"
+    )
+
+
+@pytest.mark.parametrize("stored_json", [None, "", "null", "false", "0"])
+def test_private_read_preserves_context_presence_when_json_is_missing_or_empty(
+    stored_json,
+):
+    event = {
+        "key": "event",
+        "source_kind": "slack",
+        "author": "Conversation",
+        "occurred_at": "2026-08-20T10:30:00+00:00",
+        "content": "Owner display: I prefer tea.",
+        "subject_context_json": stored_json,
+        "subject_context_digest": "stored-digest",
+    }
+    private = read_event(
+        ReadDB([[event], [], [], []]), "event", include_private_context=True
+    )["event"]
+
+    assert private["subject_context_present"] is True
+    assert private["subject_context_digest"] == "stored-digest"
+    if stored_json in {"null", "false", "0"}:
+        assert private["subject_context"] in {None, False, 0}
+
+
+def test_public_read_fails_when_context_digest_exists_without_json():
+    event = {
+        "key": "event",
+        "source_kind": "slack",
+        "author": "Conversation",
+        "occurred_at": "2026-08-20T10:30:00+00:00",
+        "content": "Owner display: I prefer tea.",
+        "subject_context_json": None,
+        "subject_context_digest": "stored-digest",
+    }
+
+    with pytest.raises(ValueError, match="context JSON is missing"):
+        read_event(ReadDB([[event], [], [], []]), "event")
 
 
 def test_event_status_returns_counts_and_failed_event_details():
