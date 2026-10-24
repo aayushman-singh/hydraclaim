@@ -241,15 +241,15 @@ def process_event(
         if context is not None:
             known_actor_refs = {subject["actor_ref"] for subject in context["subjects"]}
             unbound_users = [
-                message["actor_ref"]
-                for message in context["messages"]
+                index
+                for index, message in enumerate(context["messages"])
                 if message["role"] == "user"
                 and message["actor_ref"] not in known_actor_refs
             ]
             if unbound_users:
                 raise ValueError(
-                    "subject context contains an unbound user actor: "
-                    + ", ".join(sorted(set(unbound_users)))
+                    "subject context contains an unbound user actor at message positions: "
+                    + ", ".join(str(index) for index in unbound_users)
                 )
         active = fetch_active_claims(db)
         if context is not None:

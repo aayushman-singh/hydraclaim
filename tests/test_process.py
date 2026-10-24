@@ -564,6 +564,25 @@ def test_context_event_allows_assistant_only_no_claims(monkeypatch):
     assert _Writer.calls[0][0][0]["create"] == []
 
 
+def test_unbound_user_failure_does_not_expose_private_actor_reference(monkeypatch):
+    context = _trusted_context(actor_ref="discord:987654321")
+    event = _context_event(context)
+    monkeypatch.setattr(process, "read_event", lambda _db, _key, **_kwargs: event)
+
+    with pytest.raises(ValueError, match="unbound user actor") as failure:
+        process.process_event(
+            object(),
+            "event",
+            extractor=lambda *_args: pytest.fail("unbound source reaches model"),
+            provider="jarvis-codex",
+            model="codex-test",
+        )
+
+    assert "discord:987654321" not in str(failure.value)
+    assert "discord:987654321" not in str(_Store.actions[-1][-1])
+    assert _Writer.calls == []
+
+
 def test_explicit_old_event_context_records_operator_attestation(monkeypatch):
     context = _trusted_context()
     source = _context_event(context)["event"]
