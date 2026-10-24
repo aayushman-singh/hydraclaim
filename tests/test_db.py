@@ -5,7 +5,7 @@ import json
 import httpx
 import pytest
 
-from hydraclaim.db import HydraDB, HydraDBError
+from hydraclaim.db import HydraDB, HydraDBError, unwrap
 
 
 class _Client:
@@ -56,6 +56,42 @@ def test_hydradb_wraps_json_decode_errors(monkeypatch):
 
     with pytest.raises(HydraDBError, match="invalid JSON response"):
         db.query("RETURN 1")
+
+
+def test_unwrap_decodes_typed_null_envelopes_recursively():
+    value = {
+        "type": "record",
+        "null_value": {"type": "null"},
+        "items": [{"type": "null"}, {"type": "integer", "value": 3}],
+        "unknown": {"type": "custom", "detail": "keep"},
+    }
+
+    assert unwrap(value) == {
+        "type": "record",
+        "null_value": None,
+        "items": [None, 3],
+        "unknown": {"type": "custom", "detail": "keep"},
+    }
+
+
+def test_hydradb_query_decodes_null_and_preserves_nonnull_shapes(monkeypatch):
+    response = _Response(
+        {
+            "columns": ["context", "count", "metadata"],
+            "rows": [
+                [
+                    {"type": "null"},
+                    {"type": "integer", "value": 0},
+                    {"type": "object", "value": {"ready": True}},
+                ]
+            ],
+        }
+    )
+    db = _db(monkeypatch, _Client(response=response))
+
+    assert db.query("RETURN 1") == [
+        {"context": None, "count": 0, "metadata": {"ready": True}}
+    ]
 
 
 @pytest.mark.parametrize(

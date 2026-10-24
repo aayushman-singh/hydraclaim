@@ -22,6 +22,8 @@ class HydraDBError(RuntimeError):
 def unwrap(value: Any) -> Any:
     """Collapse HydraDB typed value envelopes into plain Python values."""
     if isinstance(value, dict):
+        if len(value) == 1 and value.get("type") == "null":
+            return None
         if "type" in value and "value" in value and len(value) <= 3:
             return unwrap(value["value"])
         return {k: unwrap(v) for k, v in value.items()}
