@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 
 from hydraclaim.cypher import to_cypher_literal
+from hydraclaim.model import graph_id
 from hydraclaim.source_events import (
     SourceEventStore,
     _content_hash,
@@ -47,6 +49,53 @@ class AttemptDB(CaptureDB):
                 "event_key": "source-event:slack:message-42",
             }
         return {"c": 0}
+
+
+class ProvenanceDB:
+    def __init__(self, existing_edges=()):
+        self.queries: list[str] = []
+        self.edges = list(existing_edges)
+
+    def query_one(self, cypher: str):
+        self.queries.append(cypher)
+        if "RETURN extraction.status AS status" in cypher:
+            return {
+                "status": "RUNNING",
+                "event_id": 101,
+                "event_key": "source-event:slack:message-42",
+            }
+        relation = re.fullmatch(
+            r"MATCH \(claim:Claim \{id: (\d+)\}\)-\[:PRODUCED_BY\]->"
+            r"\(extraction:Extraction \{id: (\d+)\}\) RETURN count\(\*\) AS c",
+            cypher,
+        )
+        if relation:
+            edge = (int(relation.group(1)), int(relation.group(2)))
+            return {"c": self.edges.count(edge)}
+        raise AssertionError(f"unexpected query_one: {cypher}")
+
+    def query(self, cypher: str):
+        self.queries.append(cypher)
+        relation = re.search(
+            r"CREATE \(claim:Claim \{id: (\d+)\}\)-\[:PRODUCED_BY\]->"
+            r"\(extraction:Extraction \{id: (\d+)\}\)",
+            cypher,
+        )
+        if relation:
+            self.edges.append((int(relation.group(1)), int(relation.group(2))))
+        return []
+
+
+class InvalidRelationCountDB(ProvenanceDB):
+    def __init__(self, response):
+        super().__init__()
+        self.response = response
+
+    def query_one(self, cypher: str):
+        if "PRODUCED_BY" in cypher:
+            self.queries.append(cypher)
+            return self.response
+        return super().query_one(cypher)
 
 
 def event(**overrides):
@@ -333,6 +382,38 @@ def test_complete_extraction_links_claims_and_updates_states():
     assert result == {"extraction_key": "extraction", "status": "SUCCEEDED"}
     assert any("PRODUCED_BY" in query for query in db.queries)
     assert any("event.status = 'PROCESSED'" in query for query in db.queries)
+
+
+def test_complete_extraction_links_only_claims_without_provenance():
+    existing = (graph_id("claim-existing"), graph_id("extraction"))
+    db = ProvenanceDB(existing_edges=[existing])
+
+    result = SourceEventStore(db).complete_extraction(
+        "extraction", ["claim-existing", "claim-new"]
+    )
+
+    assert result == {"extraction_key": "extraction", "status": "SUCCEEDED"}
+    assert db.edges.count(existing) == 1
+    assert db.edges.count((graph_id("claim-new"), graph_id("extraction"))) == 1
+    assert db.edges == [existing, (graph_id("claim-new"), graph_id("extraction"))]
+    assert any("extraction.status = 'SUCCEEDED'" in query for query in db.queries)
+    assert any("event.status = 'PROCESSED'" in query for query in db.queries)
+
+
+@pytest.mark.parametrize(
+    "response",
+    [None, {}, {"c": -1}, {"c": True}, {"c": "0"}],
+    ids=["no-row", "missing-count", "negative", "boolean", "string"],
+)
+def test_complete_extraction_rejects_invalid_relation_count_before_writes(response):
+    db = InvalidRelationCountDB(response)
+
+    with pytest.raises(RuntimeError, match="PRODUCED_BY relation count"):
+        SourceEventStore(db).complete_extraction("extraction", ["claim-new"])
+
+    assert not any("CREATE" in query and "PRODUCED_BY" in query for query in db.queries)
+    assert not any("extraction.status = 'SUCCEEDED'" in query for query in db.queries)
+    assert not any("event.status = 'PROCESSED'" in query for query in db.queries)
 
 
 def test_failure_records_step_error_and_traceback_and_stops_state():

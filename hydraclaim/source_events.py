@@ -211,8 +211,25 @@ class SourceEventStore:
         row = self._running_extraction(extraction_key)
         extraction_id = graph_id(extraction_key)
         for claim_key in claim_keys:
+            claim_id = graph_id(claim_key)
+            relation = self._db.query_one(
+                f"MATCH (claim:Claim {{id: {claim_id}}})-[:PRODUCED_BY]->"
+                f"(extraction:Extraction {{id: {extraction_id}}}) "
+                "RETURN count(*) AS c"
+            )
+            if relation is None or "c" not in relation:
+                raise RuntimeError(
+                    "HydraDB did not return a PRODUCED_BY relation count"
+                )
+            relation_count = relation["c"]
+            if type(relation_count) is not int or relation_count < 0:
+                raise RuntimeError(
+                    "HydraDB returned an invalid PRODUCED_BY relation count"
+                )
+            if relation_count > 0:
+                continue
             self._db.query(
-                f"CREATE (claim:Claim {{id: {graph_id(claim_key)}}})-[:PRODUCED_BY]->"
+                f"CREATE (claim:Claim {{id: {claim_id}}})-[:PRODUCED_BY]->"
                 f"(extraction:Extraction {{id: {extraction_id}}})"
             )
         finished_at = datetime.now(timezone.utc).isoformat()
