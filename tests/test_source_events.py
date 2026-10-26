@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
+from hydraclaim.cypher import to_cypher_literal
 from hydraclaim.source_events import (
     SourceEventStore,
     _content_hash,
     source_event_key,
+    validate_source_event,
 )
 
 
@@ -156,6 +160,54 @@ def test_capture_persists_canonical_private_context_and_digest():
     assert '"actor_ref":"whatsapp:owner"' in write
     assert "subject_context_digest:" in write
     assert "content_hash:" in write
+
+
+@pytest.mark.parametrize("text", ["", " \t\n"])
+@pytest.mark.parametrize("include_owner_text", [False, True])
+def test_capture_preserves_empty_message_with_or_without_owner_text(
+    text, include_owner_text
+):
+    context = subject_context()
+    context["messages"].append(
+        {
+            **context["messages"][0],
+            "msg_id": "q:43",
+            "ts": "2026-08-20T10:30:01+00:00",
+            "text": text,
+        }
+    )
+    if not include_owner_text:
+        context["messages"] = context["messages"][1:]
+    content = (
+        ("Owner display: Launch moves to Monday.\n" if include_owner_text else "")
+        + "Owner display: "
+        + text
+    )
+    source = event(
+        content=content,
+        occurred_at="2026-08-20T10:30:01+00:00",
+        subject_context=context,
+    )
+    checked = validate_source_event(source)
+    assert checked["content"] == content
+    assert checked["subject_context"] == context
+
+    db = ContextCaptureDB()
+    result = SourceEventStore(db).capture(source)
+
+    assert result["status"] == "CAPTURED"
+    write = db.queries[-1]
+    expected_json = json.dumps(
+        context, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
+    assert to_cypher_literal(expected_json) in write
+    assert "content: " + to_cypher_literal(content) in write
+
+    changed = {**source, "content": content + "omitted source message"}
+    rejected_db = ContextCaptureDB()
+    with pytest.raises(ValueError, match="reconstruct source content"):
+        SourceEventStore(rejected_db).capture(changed)
+    assert rejected_db.queries == []
 
 
 def test_capture_rejects_reused_source_key_with_changed_context():

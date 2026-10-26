@@ -107,7 +107,9 @@ def validate_subject_context(value: object) -> dict:
         message_ids.add(msg_id)
         _timestamp(raw["ts"], f"{path}.ts")
         author = _source_text(raw["author"], f"{path}.author")
-        text = _source_text(raw["text"], f"{path}.text")
+        text = raw["text"]
+        if not isinstance(text, str):
+            raise ValueError(f"{path}.text must be a string")
         role = raw["role"]
         actor_ref = raw["actor_ref"]
         if role not in {"user", "assistant"}:
