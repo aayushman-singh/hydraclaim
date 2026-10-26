@@ -486,6 +486,48 @@ def test_context_event_preserves_structured_messages_and_private_provenance(
     }
 
 
+@pytest.mark.parametrize("text", ["", " \t\n"])
+def test_context_processing_keeps_empty_messages_beside_eligible_owner_evidence(
+    monkeypatch, text
+):
+    context = _trusted_context()
+    context["messages"].append(
+        {
+            **context["messages"][0],
+            "msg_id": "q:43",
+            "ts": "2026-08-20T10:30:03+00:00",
+            "text": text,
+        }
+    )
+    event = _context_event(context)
+    monkeypatch.setattr(process, "read_event", lambda _db, _key, **_kwargs: event)
+    seen = []
+
+    def extractor(session, _entities, _active):
+        seen.extend(session["messages"])
+        return [_context_draft()], []
+
+    result = process.process_event(
+        object(),
+        "event",
+        extractor=extractor,
+        provider="jarvis-codex",
+        model="codex-test",
+    )
+
+    assert result["status"] == "SUCCEEDED"
+    assert [(message["msg_id"], message["text"]) for message in seen] == [
+        ("q:42", "I prefer tea."),
+        ("r:9", "Tea is noted."),
+        ("q:43", text),
+    ]
+    assert [(message["role"], message["eligible"]) for message in seen] == [
+        ("user", True),
+        ("assistant", False),
+        ("user", True),
+    ]
+
+
 def test_context_roster_keeps_existing_graph_canonical_spelling():
     roster, names = process._subject_context_roster(
         _trusted_context(), [{"subject": "Owner"}]

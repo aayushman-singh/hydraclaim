@@ -56,6 +56,50 @@ def test_validate_subject_context_preserves_exact_source_author_and_text():
     assert checked["messages"][0]["text"] == " I prefer tea. "
 
 
+@pytest.mark.parametrize("text", ["", " \t\n"])
+@pytest.mark.parametrize("message_index", [0, 1])
+def test_validate_subject_context_preserves_empty_and_whitespace_message_text(
+    text, message_index
+):
+    value = context()
+    value["messages"][message_index]["text"] = text
+
+    checked = validate_subject_context(value)
+
+    assert checked == value
+
+
+@pytest.mark.parametrize("text", [None, False, 0, [], {}])
+def test_validate_subject_context_rejects_nonstring_message_text(text):
+    value = context()
+    value["messages"][0]["text"] = text
+
+    with pytest.raises(ValueError, match=r"messages\[0\]\.text"):
+        validate_subject_context(value)
+
+
+@pytest.mark.parametrize(
+    ("field", "invalid"),
+    [
+        ("author", ""),
+        ("author", " \t\n"),
+        ("author", None),
+        ("msg_id", ""),
+        ("actor_ref", ""),
+        ("source_actor_ref", ""),
+        ("role", ""),
+    ],
+)
+def test_empty_message_text_does_not_relax_author_or_identity_validation(
+    field, invalid
+):
+    value = context()
+    value["messages"][0].update(text="", **{field: invalid})
+
+    with pytest.raises(ValueError, match=field):
+        validate_subject_context(value)
+
+
 def test_validate_subject_context_rejects_ambiguous_subject_names_and_aliases():
     value = context()
     value["subjects"].append(

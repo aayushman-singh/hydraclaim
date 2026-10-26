@@ -82,6 +82,8 @@ def test_unified_commands_report_invalid_document_without_traceback(
     scenario_path.write_text(json.dumps({}), encoding="utf-8")
     drafts_path.write_text(json.dumps({"drafts": []}), encoding="utf-8")
     monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_BASE_URL", "http://127.0.0.1:9/v1")
+    monkeypatch.setenv("LLM_MODEL", "test-model")
 
     paths = scenario_path if command == "extract" else (scenario_path, drafts_path)
     assert cli.main([command, *arguments(paths)]) == 1
@@ -105,6 +107,8 @@ def test_documented_module_forms_report_invalid_root_without_traceback(
         arguments.append(str(drafts_path))
     environment = os.environ.copy()
     environment["LLM_API_KEY"] = "test-key"
+    environment["LLM_BASE_URL"] = "http://127.0.0.1:9/v1"
+    environment["LLM_MODEL"] = "test-model"
 
     completed = subprocess.run(
         [sys.executable, "-m", module, *arguments],

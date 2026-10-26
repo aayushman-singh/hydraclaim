@@ -29,6 +29,8 @@ def test_llm_option_selects_llm_classification_mode(monkeypatch):
     monkeypatch.setattr(config, "connect", lambda: _FakeConnection())
     monkeypatch.setattr(retrieve, "answer", fake_answer)
     monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_BASE_URL", "http://127.0.0.1:9/v1")
+    monkeypatch.setenv("LLM_MODEL", "test-model")
     monkeypatch.setattr(
         sys,
         "argv",
