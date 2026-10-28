@@ -21,6 +21,35 @@ ROSTER = [
 NOW = datetime(2026, 5, 25, tzinfo=timezone.utc)
 
 
+@pytest.mark.parametrize(
+    ("question", "predicate"),
+    [
+        ("What did the owner decide about cart reads?", "decided"),
+        ("What is the owner status?", "status"),
+        ("What does the owner prefer?", "prefers"),
+        ("What is the owner deadline?", "deadline"),
+        ("Who is the owner?", "owned_by"),
+    ],
+)
+def test_owner_subject_preserves_question_predicate(question, predicate):
+    result = heuristic_classify(question, [{"name": "owner", "aliases": []}], NOW)
+    assert result.subject == "owner"
+    assert result.predicate == predicate
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Who owns the product launch budget?",
+        "Who owned the product launch?",
+        "Who is the owner of the product launch?",
+        "What is the ownership of the product launch?",
+    ],
+)
+def test_ownership_question_preserves_predicate(question):
+    assert heuristic_classify(question, ROSTER, NOW).predicate == "owned_by"
+
+
 def _probe(**kw):
     defaults = dict(
         subject="payments integration",

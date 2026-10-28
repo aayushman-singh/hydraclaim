@@ -161,6 +161,14 @@ def _find_subject(question: str, roster: list[dict]) -> str | None:
 def _find_predicate(question: str) -> str | None:
     q = question.lower()
     for predicate, keywords in _PREDICATE_KEYWORDS:
+        if predicate == "owned_by":
+            if re.search(
+                r"\b(?:own|owns|owned|ownership)\b|\bowner\s+(?:of|for)\b"
+                r"|\bwho\b.*\bowner\b",
+                q,
+            ):
+                return predicate
+            continue
         if any(kw in q for kw in keywords):
             return predicate
     return None
