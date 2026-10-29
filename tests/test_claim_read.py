@@ -580,7 +580,8 @@ def test_relation_reads_filter_unselected_endpoints():
     assert db.queries
     relation_queries = [query for query in db.queries if "SUPERSEDES" in query]
     assert relation_queries
-    assert all(" IN [1, 2]" in query for query in relation_queries)
+    assert all(" IN [" not in query for query in relation_queries)
+    assert all("(b.id = 1 OR b.id = 2)" in query for query in relation_queries)
     assert all("LIMIT 26" in query for query in relation_queries)
     assert all(", (" not in query for query in db.queries)
     assert all("a:Claim {id:" in query for query in relation_queries)

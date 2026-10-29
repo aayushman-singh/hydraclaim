@@ -252,11 +252,13 @@ LIMIT {int(scope.limit) + 1}"""
             return_fields = "a.id AS a_id, b.id AS b_id, r.resolved AS resolved"
             relation_match = "-[r:CONTRADICTS]->"
         rows: list[dict] = []
-        selected_ids = ", ".join(str(int(claim_id)) for claim_id in sorted(claim_ids))
+        selected_ids = " OR ".join(
+            f"b.id = {int(claim_id)}" for claim_id in sorted(claim_ids)
+        )
         for claim_id in sorted(claim_ids):
             if self._read_claim_scope_membership(claim_id, scope) is None:
                 continue
-            predicates = [f"b.id IN [{selected_ids}]"]
+            predicates = [f"({selected_ids})"]
             if scope.predicate:
                 predicates.extend(
                     [
