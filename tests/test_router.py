@@ -29,6 +29,8 @@ NOW = datetime(2026, 5, 25, tzinfo=timezone.utc)
         ("What does the owner prefer?", "prefers"),
         ("What is the owner deadline?", "deadline"),
         ("Who is the owner?", "owned_by"),
+        ("Who did the owner assign to cart reads?", "assigned_to"),
+        ("Who did the owner decide to hire?", "decided"),
     ],
 )
 def test_owner_subject_preserves_question_predicate(question, predicate):

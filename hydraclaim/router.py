@@ -164,7 +164,7 @@ def _find_predicate(question: str) -> str | None:
         if predicate == "owned_by":
             if re.search(
                 r"\b(?:own|owns|owned|ownership)\b|\bowner\s+(?:of|for)\b"
-                r"|\bwho\b.*\bowner\b",
+                r"|\bwho\s+(?:is|was|are|were)\s+(?:the\s+)?owner\b",
                 q,
             ):
                 return predicate
