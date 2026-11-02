@@ -1049,6 +1049,26 @@ def _read_repair_claim(db: Any, expected: QualificationClaimRepair) -> dict:
     row = rows[0]
     if not isinstance(row, dict):
         raise GraphIntegrityError(f"invalid repair row for Claim {claim_key!r}")
+    subjects = db.query(
+        f"MATCH (c:Claim {{id: {graph_id(claim_key)}}})"
+        "-[:ABOUT]->(entity:Entity) RETURN entity.name AS subject LIMIT 2"
+    )
+    if (
+        not isinstance(subjects, list)
+        or len(subjects) != 1
+        or not isinstance(subjects[0], dict)
+        or not isinstance(subjects[0].get("subject"), str)
+        or not subjects[0]["subject"].strip()
+    ):
+        raise GraphIntegrityError(
+            f"repair requires one subject relation for Claim {claim_key!r}"
+        )
+    subject = subjects[0]["subject"]
+    if row.get("subject") is not None and row["subject"] != subject:
+        raise GraphIntegrityError(
+            f"repair subject property differs from relation for Claim {claim_key!r}"
+        )
+    row["subject"] = subject
     try:
         evidence_id = int(row["evidence_id"])
     except (KeyError, TypeError, ValueError) as exc:

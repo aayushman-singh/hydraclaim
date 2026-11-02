@@ -75,9 +75,16 @@ class RepairDB(NoWriteDB):
         self.zero_match_write = zero_match_write
         self.commit_then_raise = commit_then_raise
         self.quoted_from_counts = quoted_from_counts or {}
+        self.subjects = {
+            identity: [{"subject": row["subject"]}]
+            for identity, row in self.claims.items()
+        }
 
     def query(self, cypher):
         self.queries.append(cypher)
+        if "-[:ABOUT]->(entity:Entity)" in cypher:
+            identity = int(re.search(r"id: (\d+)", cypher).group(1))
+            return self.subjects.get(identity, [])
         if "MATCH (ev:Evidence" in cypher and "QUOTED_FROM" in cypher:
             evidence_id = int(re.search(r"id: (\d+)", cypher).group(1))
             row = next(
@@ -399,6 +406,38 @@ def test_stored_endpoint_qualifier_participates_in_supersession_validation():
             [{"new_id": "new", "old_id": "old", "at": "2026-10-29"}],
             {"new": ("owner", "decided", "report cadence")},
         )
+
+    assert db.writes == []
+
+
+def test_qualification_repair_reads_subject_from_existing_relation():
+    db = RepairDB(
+        {"cart": _repair_row("cart"), "report": _repair_row("report")},
+        edges=[("report", "cart", {"at": "2026-10-30", "invalidated_by": None})],
+    )
+    for row in db.claims.values():
+        row["subject"] = None
+
+    receipt = GraphWriter(db).repair_qualifications(_repair())
+
+    assert receipt.dry_run
+    assert len(receipt.claims_before) == 2
+    assert db.writes == []
+
+
+@pytest.mark.parametrize(
+    "subjects",
+    [[], [{"subject": "other"}], [{"subject": "owner"}, {"subject": "owner"}]],
+)
+def test_qualification_repair_rejects_missing_changed_or_duplicate_subject(subjects):
+    db = RepairDB(
+        {"cart": _repair_row("cart"), "report": _repair_row("report")},
+        edges=[("report", "cart", {"at": "2026-10-30", "invalidated_by": None})],
+    )
+    db.subjects[graph_id("cart")] = subjects
+
+    with pytest.raises(GraphIntegrityError, match="subject"):
+        GraphWriter(db).repair_qualifications(_repair(), dry_run=False)
 
     assert db.writes == []
 
