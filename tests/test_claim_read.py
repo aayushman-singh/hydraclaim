@@ -89,7 +89,7 @@ class _OrderingDB:
                 ],
             ]
             return [row for row in memberships if f"{{id: {row['id']}}}" in cypher]
-        if "-[:SUPERSEDES]->" in cypher:
+        if "-[r:SUPERSEDES]->" in cypher:
             return list(self.chain) if "{id: 10}" in cypher else []
         if "SUPERSEDES*1..5" in cypher:
             return list(self.chain)
@@ -186,7 +186,7 @@ class _CrossScopeChainDB:
                     "predicate": "status",
                 },
             ]
-        if "-[:SUPERSEDES]->" in cypher:
+        if "-[r:SUPERSEDES]->" in cypher:
             if "{id: 10}" in cypher:
                 return [
                     {
@@ -258,7 +258,7 @@ class _IterativeChainDB:
                     "predicate": "deadline",
                 },
             ]
-        if "-[:SUPERSEDES]->" in cypher and "{id: 10}" in cypher:
+        if "-[r:SUPERSEDES]->" in cypher and "{id: 10}" in cypher:
             return [
                 {
                     "id": 11,
@@ -268,7 +268,7 @@ class _IterativeChainDB:
                     "predicate": "deadline",
                 }
             ]
-        if "-[:SUPERSEDES]->" in cypher and "{id: 11}" in cypher:
+        if "-[r:SUPERSEDES]->" in cypher and "{id: 11}" in cypher:
             return [
                 {
                     "id": 12,
@@ -292,7 +292,7 @@ class _CycleChainDB:
             return [
                 {"id": claim_id, "subject": "product launch", "predicate": "deadline"}
             ]
-        if "-[:SUPERSEDES]->" not in cypher:
+        if "-[r:SUPERSEDES]->" not in cypher:
             return []
         if "{id: 10}" in cypher:
             return [
@@ -339,7 +339,7 @@ class _BranchingChainDB:
                     }
                 ]
             return []
-        if "-[:SUPERSEDES]->" in cypher:
+        if "-[r:SUPERSEDES]->" in cypher:
             claim_id = int(cypher.split("{id: ", 1)[1].split("}", 1)[0])
             return [
                 {
@@ -557,7 +557,7 @@ def test_chain_scope_constrains_start_and_older_claims_and_orders_ties():
     chain = ClaimReader(db).read_chain(10, ClaimScope("product launch", "deadline"))
 
     assert [row["id"] for row in chain] == [2, 1]
-    query = next(query for query in db.queries if "-[:SUPERSEDES]->" in query)
+    query = next(query for query in db.queries if "-[r:SUPERSEDES]->" in query)
     assert "current:Claim {id: 10}" in query
     assert "start_e.name" not in query
     assert "current.predicate" in query
@@ -638,7 +638,7 @@ def test_chain_stops_at_out_of_scope_intermediate_claim():
 
     assert {row["id"] for row in chain}.isdisjoint({11, 12})
     assert not any(
-        "-[:SUPERSEDES]->" in query and "{id: 11}" in query for query in db.queries
+        "-[r:SUPERSEDES]->" in query and "{id: 11}" in query for query in db.queries
     )
     assert all("SUPERSEDES*" not in query for query in db.queries)
 

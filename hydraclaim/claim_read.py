@@ -1,7 +1,7 @@
 """Bounded, typed reads for claims and answers.
 
 This module owns the read boundary for HydraClaim.  Every claim and relation
-query is scoped to one subject and, when supplied, one predicate.
+query is scoped to one subject and, when supplied, one predicate and qualifier.
 """
 
 from __future__ import annotations
@@ -11,6 +11,12 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
+from hydraclaim.claims import (
+    QualifierSelection,
+    canonical_qualifier,
+    claim_qualifier,
+    requires_qualifier,
+)
 from hydraclaim.cypher import to_cypher_literal as lit
 from hydraclaim.db import HydraDB
 from hydraclaim.errors import GraphIntegrityError
@@ -32,6 +38,26 @@ class ClaimScope:
     active_only: bool = False
     as_of: str | None = None
     limit: int = DEFAULT_CLAIM_READ_LIMIT
+    qualifier: str | QualifierSelection | None = None
+
+    def __post_init__(self) -> None:
+        if isinstance(self.qualifier, str):
+            object.__setattr__(self, "qualifier", canonical_qualifier(self.qualifier))
+        elif (
+            self.qualifier is not None and self.qualifier is not QualifierSelection.ALL
+        ):
+            raise ValueError("invalid qualifier selection")
+        if self.predicate is None and self.qualifier is None:
+            raise ValueError(
+                "an all-predicate read requires an explicit qualifier selection"
+            )
+        if self.predicate and requires_qualifier(self.predicate):
+            if self.qualifier is None:
+                raise ValueError(
+                    "qualified predicate requires an explicit qualifier selection"
+                )
+        elif self.predicate and self.qualifier not in (None, QualifierSelection.ALL):
+            raise ValueError("unqualified predicate does not accept a qualifier")
 
 
 class ClaimReadLimitError(ValueError):
@@ -67,6 +93,7 @@ class ClaimView:
     extraction_confidence: float | None
     source_kind: str | None
     author: str | None
+    qualifier: str | None = None
 
 
 @dataclass(frozen=True)
@@ -88,6 +115,7 @@ class Citation:
     source_kind: str | None
     author: str | None
     quote: str | None
+    qualifier: str | None = None
 
 
 @dataclass(frozen=True)
@@ -107,6 +135,15 @@ class AnswerResult:
             "classification": asdict(self.classification),
             "probe": asdict(self.probe) if self.probe is not None else None,
         }
+
+
+def _invalidated_relation(row: dict) -> bool:
+    marker = row.get("invalidated_by")
+    if marker is None:
+        return False
+    if not isinstance(marker, str) or not marker.strip():
+        raise GraphIntegrityError("malformed relation invalidation marker")
+    return True
 
 
 def _chain_depth(edges: list[tuple[int, int]], ids: set[int]) -> int:
@@ -189,7 +226,7 @@ MATCH (c:Claim)-[:ABOUT]->(e:Entity)
 WHERE {" AND ".join(clauses)}
 OPTIONAL MATCH (c)-[:SUPPORTED_BY]->(ev:Evidence)-[:FROM]->(s:Source)
 RETURN c.id AS id, c.key AS key, e.name AS subject, c.predicate AS predicate,
-       c.value AS value, c.valid_from AS valid_from, c.valid_to AS valid_to,
+       c.qualifier AS qualifier, c.value AS value, c.valid_from AS valid_from, c.valid_to AS valid_to,
        c.status AS status, c.confidence AS confidence,
        ev.quote AS quote, ev.explicitness AS explicitness,
        ev.extraction_confidence AS extraction_confidence,
@@ -215,13 +252,25 @@ LIMIT {int(scope.limit) + 1}"""
                 predicate=scope.predicate,
                 limit=scope.limit,
             )
-        return tuple(
+        claims = tuple(
             self._to_claim_view(row, scope, index) for index, row in enumerate(rows, 1)
         )
+        if isinstance(scope.qualifier, str):
+            claims = tuple(
+                claim for claim in claims if claim.qualifier == scope.qualifier
+            )
+        return claims
 
     @staticmethod
     def _to_claim_view(row: dict, scope: ClaimScope, ordinal: int) -> ClaimView:
+        try:
+            qualifier = claim_qualifier(row["predicate"], row.get("qualifier"))
+        except ValueError as exc:
+            raise GraphIntegrityError(
+                f"invalid stored claim qualifier at row {ordinal}: {exc}"
+            ) from exc
         return ClaimView(
+            qualifier=qualifier,
             id=int(row.get("id", ordinal)),
             key=row.get("key"),
             subject=row.get("subject", scope.subject),
@@ -246,10 +295,12 @@ LIMIT {int(scope.limit) + 1}"""
         if not claim_ids:
             return ()
         if relation_type == "SUPERSEDES":
-            return_fields = "a.id AS new_id, b.id AS old_id"
-            relation_match = "-[:SUPERSEDES]->"
+            return_fields = (
+                "a.id AS new_id, b.id AS old_id, r.invalidated_by AS invalidated_by"
+            )
+            relation_match = "-[r:SUPERSEDES]->"
         else:
-            return_fields = "a.id AS a_id, b.id AS b_id, r.resolved AS resolved"
+            return_fields = "a.id AS a_id, b.id AS b_id, r.resolved AS resolved, r.invalidated_by AS invalidated_by"
             relation_match = "-[r:CONTRADICTS]->"
         rows: list[dict] = []
         selected_ids = " OR ".join(
@@ -285,12 +336,18 @@ LIMIT {int(scope.limit) + 1}"""
                     limit=scope.limit,
                 )
             for row in relation_rows:
+                if _invalidated_relation(row):
+                    continue
                 target_key = "old_id" if relation_type == "SUPERSEDES" else "b_id"
                 target_id = int(row.get(target_key, row.get("dst")))
                 if target_id not in claim_ids:
                     continue
-                if self._read_claim_scope_membership(target_id, scope) is None:
+                source = self._read_claim_scope_membership(claim_id, scope)
+                target = self._read_claim_scope_membership(target_id, scope)
+                if target is None:
                     continue
+                if source["qualifier"] != target["qualifier"]:
+                    raise GraphIntegrityError("claim relation crosses qualifier scopes")
                 rows.append(row)
                 if len(rows) > scope.limit:
                     raise ClaimReadLimitError(
@@ -370,11 +427,12 @@ LIMIT {int(scope.limit) + 1}"""
                 continue
             rows = self._db.query(
                 f"""
-MATCH (current:Claim {{id: {current_id}}})-[:SUPERSEDES]->(older:Claim)
+MATCH (current:Claim {{id: {current_id}}})-[r:SUPERSEDES]->(older:Claim)
 WHERE {" AND ".join(predicate_clauses)}
 OPTIONAL MATCH (older)-[:ABOUT]->(older_entity:Entity)
 OPTIONAL MATCH (older)-[:SUPPORTED_BY]->(older_ev:Evidence)-[:FROM]->(older_source:Source)
 RETURN older.id AS id, older.value AS value,
+       r.invalidated_by AS invalidated_by, older.qualifier AS qualifier,
        older.key AS key, older.valid_from AS valid_from, older.valid_to AS valid_to,
        older_entity.name AS subject, older.predicate AS predicate,
        older_ev.quote AS quote, older_source.kind AS source_kind,
@@ -397,12 +455,16 @@ LIMIT {int(scope.limit) + 1}"""
                 reverse=True,
             )
             for row in rows:
+                if _invalidated_relation(row):
+                    continue
                 older_id = int(row["id"])
                 if row["predicate"] != start_predicate:
                     continue
                 older = self._read_claim_scope_membership(older_id, scope)
                 if older is None or older["predicate"] != start_predicate:
                     continue
+                if older["qualifier"] != start["qualifier"]:
+                    raise GraphIntegrityError("claim chain crosses qualifier scopes")
                 chain_edges.add((current_id, older_id))
                 within_depth = current_depth < MAX_CHAIN_DEPTH
                 if older_id not in seen_ids and within_depth:
@@ -455,7 +517,7 @@ LIMIT {int(scope.limit) + 1}"""
             f"""
 MATCH (c:Claim {{id: {int(claim_id)}}})-[:ABOUT]->(e:Entity {{name: {lit(scope.subject)}}})
 WHERE {" AND ".join(clauses)}
-RETURN c.id AS id, e.name AS subject, c.predicate AS predicate
+RETURN c.id AS id, e.name AS subject, c.predicate AS predicate, c.qualifier AS qualifier
 LIMIT {int(scope.limit) + 1}"""
         )
         if len(rows) > scope.limit:
@@ -472,7 +534,15 @@ LIMIT {int(scope.limit) + 1}"""
                 continue
             if scope.predicate and row.get("predicate") != scope.predicate:
                 continue
-            return row
+            try:
+                qualifier = claim_qualifier(row["predicate"], row.get("qualifier"))
+            except ValueError as exc:
+                raise GraphIntegrityError(
+                    f"invalid stored claim qualifier: {exc}"
+                ) from exc
+            if isinstance(scope.qualifier, str) and qualifier != scope.qualifier:
+                continue
+            return {**row, "qualifier": qualifier}
         return None
 
     def probe(self, scope: ClaimScope) -> ProbeResult:
@@ -482,12 +552,17 @@ LIMIT {int(scope.limit) + 1}"""
                 predicate=scope.predicate,
                 as_of=scope.as_of,
                 limit=scope.limit,
+                qualifier=scope.qualifier,
             )
         )
         coverage = len(claims)
         active_ids = {claim.id for claim in claims if claim.status == "active"}
         distinct_values = len(
-            {claim.value.strip().lower() for claim in claims if claim.id in active_ids}
+            {
+                (claim.qualifier, claim.value.strip().lower())
+                for claim in claims
+                if claim.id in active_ids
+            }
         )
         conflicts = 0
         chain_depth = 0
@@ -524,6 +599,7 @@ LIMIT {int(scope.limit) + 1}"""
         llm_fn=None,
         now: datetime | None = None,
         force_route: str | None = None,
+        qualifier: str | QualifierSelection | None = None,
     ) -> AnswerResult:
         from hydraclaim.router import (
             ROUTE_ABSTAIN,
@@ -550,7 +626,49 @@ LIMIT {int(scope.limit) + 1}"""
                 probe=None,
             )
 
+        selection = qualifier
+        if classification.predicate and requires_qualifier(classification.predicate):
+            match = re.search(
+                r"\b(?:about|regarding)\s+(.+?)[?.!]*$", question, re.IGNORECASE
+            )
+            requested = (
+                canonical_qualifier(
+                    re.sub(
+                        r"\s+before the most recent change[?.!]*$",
+                        "",
+                        match.group(1),
+                        flags=re.IGNORECASE,
+                    )
+                )
+                if match
+                else None
+            )
+            if selection is None:
+                selection = requested
+            elif requested is not None and (
+                selection is QualifierSelection.ALL
+                or canonical_qualifier(selection) != requested
+            ):
+                return AnswerResult(
+                    ROUTE_ABSTAIN,
+                    "The requested qualifier does not match the explicit selection.",
+                    (),
+                    classification,
+                    None,
+                )
+            if selection is None:
+                return AnswerResult(
+                    ROUTE_ABSTAIN,
+                    "Specify the decision or preference qualifier.",
+                    (),
+                    classification,
+                    None,
+                )
+        elif classification.predicate is None:
+            selection = QualifierSelection.ALL
+
         scope = ClaimScope(
+            qualifier=selection,
             subject=classification.subject,
             predicate=classification.predicate,
             as_of=classification.as_of,
@@ -564,6 +682,7 @@ LIMIT {int(scope.limit) + 1}"""
                         subject=classification.subject,
                         active_only=True,
                         as_of=classification.as_of,
+                        qualifier=QualifierSelection.ALL,
                     )
                 )
                 available = sorted({claim.predicate for claim in active_any})
@@ -576,6 +695,7 @@ LIMIT {int(scope.limit) + 1}"""
             ClaimScope(
                 subject=classification.subject,
                 predicate=classification.predicate,
+                qualifier=selection,
                 active_only=True,
                 as_of=classification.as_of,
             )
@@ -587,6 +707,48 @@ LIMIT {int(scope.limit) + 1}"""
                 + (f" as of {classification.as_of}." if classification.as_of else ".")
             )
             return AnswerResult(ROUTE_ABSTAIN, text, (), classification, probe_result)
+
+        if (
+            selection is QualifierSelection.ALL
+            and classification.predicate
+            and requires_qualifier(classification.predicate)
+        ):
+            if classification.question_type == "temporal" and not classification.as_of:
+                return AnswerResult(
+                    ROUTE_ABSTAIN,
+                    "Specify one qualifier for a temporal comparison.",
+                    (),
+                    classification,
+                    probe_result,
+                )
+            groups: dict[str, list[ClaimView]] = {}
+            for claim in active:
+                groups.setdefault(claim.qualifier, []).append(claim)
+            sections = []
+            for name, claims in groups.items():
+                if len({claim.value.strip().casefold() for claim in claims}) > 1:
+                    ranked = rank_claims(
+                        [_claim_dict(claim) for claim in claims],
+                        classification.predicate,
+                        now,
+                    )
+                    sections.append(
+                        f"Qualifier: {name}\n"
+                        + build_conflict_answer(
+                            classification.subject, classification.predicate, ranked
+                        )
+                    )
+                else:
+                    sections.extend(
+                        build_fast_answer(_claim_dict(claim)) for claim in claims
+                    )
+            return AnswerResult(
+                "DEEP",
+                "\n".join(sections),
+                tuple(_citation(claim) for claim in active),
+                classification,
+                probe_result,
+            )
 
         if classification.predicate and _ORIGIN_RE.search(question):
             history = self.read_claims(scope)
@@ -603,16 +765,43 @@ LIMIT {int(scope.limit) + 1}"""
             )
 
         if classification.question_type == "temporal" and classification.predicate:
-            history = self.read_claims(scope)
-            if (
-                "before the most recent change" in question.lower()
-                and len(history) >= 2
-            ):
-                current, previous = history[0], history[1]
+            if "before the most recent change" in question.lower():
+                if not requires_qualifier(classification.predicate):
+                    history = self.read_claims(scope)
+                    if len(history) >= 2:
+                        current, previous = history[0], history[1]
+                        return AnswerResult(
+                            route,
+                            build_temporal_answer(
+                                _claim_dict(current), _claim_dict(previous)
+                            ),
+                            (_citation(current), _citation(previous)),
+                            classification,
+                            probe_result,
+                        )
+                if len(active) != 1:
+                    return AnswerResult(
+                        ROUTE_ABSTAIN,
+                        "The active Claims do not identify one change for comparison.",
+                        (),
+                        classification,
+                        probe_result,
+                    )
+                chain = self.read_chain(active[0].id, scope)
+                if chain:
+                    current = _claim_dict(active[0])
+                    previous = chain[0]
+                    return AnswerResult(
+                        route,
+                        build_temporal_answer(current, previous),
+                        (_citation(active[0]), _citation(previous)),
+                        classification,
+                        probe_result,
+                    )
                 return AnswerResult(
-                    route,
-                    build_temporal_answer(_claim_dict(current), _claim_dict(previous)),
-                    (_citation(current), _citation(previous)),
+                    ROUTE_ABSTAIN,
+                    "No earlier Claim supports the requested comparison.",
+                    (),
                     classification,
                     probe_result,
                 )
@@ -680,6 +869,7 @@ def _citation(claim: ClaimView | dict) -> Citation:
         source_kind = claim.source_kind
         author = claim.author
         quote = claim.quote
+        qualifier = claim.qualifier
     else:
         claim_id = claim.get("key") or claim["id"]
         value = claim["value"]
@@ -688,8 +878,10 @@ def _citation(claim: ClaimView | dict) -> Citation:
         source_kind = claim.get("source_kind")
         author = claim.get("author")
         quote = claim.get("quote")
+        qualifier = claim.get("qualifier")
     return Citation(
         claim_id=claim_id,
+        qualifier=qualifier,
         value=value,
         valid_from=valid_from,
         valid_to=valid_to,

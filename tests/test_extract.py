@@ -183,6 +183,7 @@ def _trusted_response(author="owner"):
             {
                 "subject": "owner",
                 "predicate": "prefers",
+                "qualifier": "tea",
                 "value": "tea",
                 "valid_from": "2026-08-20",
                 "quote": "I prefer tea.",

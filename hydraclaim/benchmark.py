@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from hydraclaim.claim_read import ClaimReader, ClaimScope
+from hydraclaim.claims import QUALIFIED_PREDICATES, QualifierSelection
 from hydraclaim.db import HydraDB
 from hydraclaim.retrieve import fetch_entities
 from hydraclaim.router import ROUTE_DEEP, ROUTE_FAST, classify
@@ -30,7 +31,13 @@ def _tokenize(text: str) -> set[str]:
     return set(_normalize(text).split())
 
 
-def naive_answer(db: CountingDB, question: str, roster: list[dict]) -> dict:
+def naive_answer(
+    db: CountingDB,
+    question: str,
+    roster: list[dict],
+    *,
+    qualifier: str | QualifierSelection | None = None,
+) -> dict:
     """Flat-RAG baseline: score claims by token overlap with the question.
 
     Does not use SUPERSEDES/CONTRADICTS edges or predicate coverage — it just
@@ -48,15 +55,28 @@ def naive_answer(db: CountingDB, question: str, roster: list[dict]) -> dict:
             "citations": [],
         }
 
+    selection = qualifier
+    if cls.predicate is None:
+        selection = QualifierSelection.ALL
     rows = [
         {
             "predicate": claim.predicate,
+            "qualifier": claim.qualifier,
             "value": claim.value,
             "status": claim.status,
             "valid_from": claim.valid_from,
         }
         for claim in ClaimReader(db).read_claims(
-            ClaimScope(subject=cls.subject, active_only=True)
+            ClaimScope(
+                subject=cls.subject,
+                predicate=cls.predicate,
+                active_only=True,
+                qualifier=(
+                    selection
+                    if cls.predicate in QUALIFIED_PREDICATES or cls.predicate is None
+                    else None
+                ),
+            )
         )
     ]
     active = [r for r in rows if r.get("status") == "active"]
@@ -76,7 +96,10 @@ def naive_answer(db: CountingDB, question: str, roster: list[dict]) -> dict:
         q_tokens.add(cls.predicate)
 
     def score(row: dict) -> float:
-        text = f"{row.get('predicate', '')} {row.get('value', '')}"
+        text = (
+            f"{row.get('predicate', '')} {row.get('qualifier') or ''} "
+            f"{row.get('value', '')}"
+        )
         tokens = _tokenize(text)
         if not tokens:
             return 0.0
@@ -206,17 +229,22 @@ def run_arm(
             start = time.perf_counter()
 
             reader = ClaimReader(db)
+            qualifier = qa.get("qualifier")
             if arm == "router+probe":
-                result = reader.answer(question).as_dict()
+                result = reader.answer(question, qualifier=qualifier).as_dict()
             elif arm == "router-only":
                 cls = classify(question, roster)
                 result = reader.answer(
-                    question, force_route=router_only_route(cls.question_type)
+                    question,
+                    force_route=router_only_route(cls.question_type),
+                    qualifier=qualifier,
                 ).as_dict()
             elif arm == "always-deep":
-                result = reader.answer(question, force_route=ROUTE_DEEP).as_dict()
+                result = reader.answer(
+                    question, force_route=ROUTE_DEEP, qualifier=qualifier
+                ).as_dict()
             elif arm == "naive-rag":
-                result = naive_answer(db, question, roster)
+                result = naive_answer(db, question, roster, qualifier=qualifier)
             else:
                 raise ValueError(f"unknown arm: {arm}")
 

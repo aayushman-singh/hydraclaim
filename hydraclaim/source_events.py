@@ -9,7 +9,7 @@ from typing import Any
 
 from hydraclaim.claims import SOURCE_KINDS
 from hydraclaim.cypher import to_cypher_literal as lit
-from hydraclaim.model import graph_id, source_event_props
+from hydraclaim.model import graph_id, source_event_props, source_props
 from hydraclaim.subject_context import (
     canonical_subject_context,
     validate_subject_context_source,
@@ -126,7 +126,11 @@ class SourceEventStore:
         properties["ingestion_kind"] = ingestion_kind
         if ingestion_kind == "ORACLE":
             properties["status"] = "PROCESSED"
-        self._db.query(f"CREATE (event:SourceEvent {_props(properties)})")
+        source = source_props(checked["source_kind"], checked["author"])
+        self._db.query(
+            f"CREATE (event:SourceEvent {_props(properties)})-[:FROM]->"
+            f"(source:Source {_props(source)})"
+        )
         return {"event_key": key, "status": properties["status"], "created": True}
 
     def start_extraction(

@@ -29,6 +29,7 @@ from hydraclaim.claim_read import (
     build_fast_answer,
     build_temporal_answer,
 )
+from hydraclaim.claims import QualifierSelection
 from hydraclaim.db import HydraDB
 
 
@@ -61,6 +62,7 @@ def fetch_claims(
     active_only: bool = False,
     as_of: str | None = None,
     limit: int = 25,
+    qualifier: str | QualifierSelection | None = None,
 ) -> list[dict]:
     return [
         claim.__dict__.copy()
@@ -71,6 +73,7 @@ def fetch_claims(
                 active_only=active_only,
                 as_of=as_of,
                 limit=limit,
+                qualifier=qualifier,
             )
         )
     ]
@@ -84,13 +87,14 @@ def fetch_chain(
     *,
     as_of: str | None = None,
     limit: int = DEFAULT_CLAIM_READ_LIMIT,
+    qualifier: str | QualifierSelection | None = None,
 ) -> list[dict]:
     """Read one bounded supersession chain with legacy scope resolution."""
     if subject is None:
         rows = db.query(
             f"""
 MATCH (c:Claim {{id: {int(claim_id)}}})-[:ABOUT]->(e:Entity)
-RETURN e.name AS subject, c.predicate AS predicate
+RETURN e.name AS subject, c.predicate AS predicate, c.qualifier AS qualifier
 LIMIT 2"""
         )
         if not isinstance(rows, list) or len(rows) != 1:
@@ -104,6 +108,9 @@ LIMIT 2"""
                 f"claim {claim_id!r} predicate does not match explicit scope"
             )
         subject = resolved_subject
+        predicate = resolved_predicate
+        if qualifier is None:
+            qualifier = rows[0].get("qualifier")
     return list(
         ClaimReader(db).read_chain(
             claim_id,
@@ -112,6 +119,7 @@ LIMIT 2"""
                 predicate=predicate,
                 as_of=as_of,
                 limit=limit,
+                qualifier=qualifier,
             ),
         )
     )
@@ -128,6 +136,7 @@ def answer(
     force_route: str | None = None,
     classification_mode: str = "heuristic",
     llm_fn=None,
+    qualifier: str | QualifierSelection | None = None,
 ) -> dict:
     return (
         ClaimReader(db)
@@ -137,6 +146,7 @@ def answer(
             llm_fn=llm_fn,
             now=now,
             force_route=force_route,
+            qualifier=qualifier,
         )
         .as_dict()
     )

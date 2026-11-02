@@ -141,7 +141,7 @@ def test_process_event_passes_one_live_event_roster_through_all_stages(monkeypat
 
     def extractor(_session, entities, _active):
         seen["extractor_roster"] = entities
-        return [{"id": "draft-1", "subject": "Asha Rao"}], []
+        return [{"id": "draft-1", "subject": "Asha Rao", "predicate": "status"}], []
 
     def plan_writes(drafts, active_claims, roster, *, id_prefix):
         seen["plan_roster"] = roster
@@ -425,7 +425,8 @@ def _context_draft(msg_id="q:42", author="Owner display"):
     return {
         "id": "draft-1",
         "subject": "owner",
-        "predicate": "likes",
+        "predicate": "prefers",
+        "qualifier": "tea",
         "value": "tea",
         "valid_from": "2026-08-20",
         "quote": "I prefer tea.",

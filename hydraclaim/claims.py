@@ -23,6 +23,9 @@ A claim spec (produced by scenarios, consumed by the generator and ingest):
 
 from __future__ import annotations
 
+from enum import Enum
+import re
+
 PREDICATES = frozenset(
     {
         "owned_by",
@@ -39,6 +42,91 @@ PREDICATES = frozenset(
         "budget",
     }
 )
+
+
+QUALIFIED_PREDICATES = frozenset({"decided", "prefers"})
+
+
+class QualifierSelection(Enum):
+    ALL = "all"
+
+
+def requires_qualifier(predicate: str) -> bool:
+    if predicate not in PREDICATES:
+        raise ValueError("unknown predicate in qualifier rule")
+    return predicate in QUALIFIED_PREDICATES
+
+
+def canonical_qualifier(value: object) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("qualifier must be a non-empty source phrase")
+    if any(ord(character) < 32 and not character.isspace() for character in value):
+        raise ValueError("qualifier contains a control character")
+    return " ".join(value.casefold().split())
+
+
+def claim_qualifier(predicate: str, value: object) -> str | None:
+    if requires_qualifier(predicate):
+        return canonical_qualifier(value)
+    if value is not None:
+        raise ValueError("qualifier is not allowed for this predicate")
+    return None
+
+
+def _has_qualifier(quote: str, qualifier: str) -> bool:
+    normalized = " ".join(quote.casefold().split())
+    return (
+        re.search(r"(?<!\w)" + re.escape(qualifier) + r"(?!\w)", normalized) is not None
+    )
+
+
+def validate_qualified_evidence(
+    claims: list[dict], messages: list[dict] | None = None
+) -> None:
+    qualified = []
+    by_id = (
+        {message["msg_id"]: message for message in messages}
+        if messages is not None
+        else None
+    )
+    for index, claim in enumerate(claims):
+        qualifier = claim_qualifier(claim["predicate"], claim.get("qualifier"))
+        if qualifier is None:
+            continue
+        quote = claim.get("quote")
+        if (
+            not isinstance(quote, str)
+            or not quote
+            or not _has_qualifier(quote, qualifier)
+        ):
+            raise ValueError(
+                f"claim[{index}] qualifier is not supported by its evidence"
+            )
+        if by_id is not None:
+            message = by_id.get(claim.get("msg_id"))
+            if message is None or quote not in message["text"]:
+                raise ValueError(
+                    f"claim[{index}] qualifier evidence does not match its source message"
+                )
+        qualified.append((claim, qualifier))
+    for claim, qualifier in qualified:
+        for other, other_qualifier in qualified:
+            same_message = (
+                claim.get("msg_id") == other.get("msg_id")
+                and claim.get("session_id") == other.get("session_id")
+                and claim["subject"].strip().casefold()
+                == other["subject"].strip().casefold()
+                and claim["predicate"] == other["predicate"]
+            )
+            if (
+                same_message
+                and qualifier != other_qualifier
+                and _has_qualifier(claim["quote"], other_qualifier)
+            ):
+                raise ValueError(
+                    "ambiguous qualified evidence: cite separate supported passages"
+                )
+
 
 SOURCE_KINDS = frozenset({"slack", "linear", "meeting", "chat"})
 
@@ -74,6 +162,11 @@ def validate_claim_spec(claim: dict) -> list[str]:
         errors.append(f"unknown predicate: {claim.get('predicate')!r}")
     if claim.get("source_kind") not in SOURCE_KINDS:
         errors.append(f"unknown source_kind: {claim.get('source_kind')!r}")
+    try:
+        validate_qualified_evidence([claim])
+    except (ValueError, KeyError, TypeError) as exc:
+        errors.append(f"invalid claim qualification: {exc}")
+
     for field in ("explicitness", "confidence"):
         value = claim.get(field, 1.0)
         if not 0.0 <= value <= 1.0:

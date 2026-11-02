@@ -45,7 +45,7 @@ class TestClaimProps:
     def test_open_validity_window(self):
         claim = {
             "subject": "payments",
-            "predicate": "owner",
+            "predicate": "owned_by",
             "value": "Priya Shah",
             "valid_from": "2026-05-01",
             "quote": "q",

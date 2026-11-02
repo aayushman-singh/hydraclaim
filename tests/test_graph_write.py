@@ -96,6 +96,13 @@ class IdempotentDB(RecordingDB):
         return {"c": 0}
 
 
+class OneHopCreateDB(IdempotentDB):
+    def query(self, cypher):
+        if cypher.lstrip().startswith("CREATE"):
+            assert "->" in cypher, f"standalone CREATE is unsupported: {cypher}"
+        return super().query(cypher)
+
+
 def _claim(key="c1", **overrides):
     claim = {
         "key": key,
@@ -180,6 +187,22 @@ def test_apply_plan_does_not_duplicate_existing_claim_writes():
     assert first_write_count == 1
     assert len([q for q in db.writes if "SUPPORTED_BY" in q]) == 1
     assert len([q for q in db.writes if "[:ABOUT]" in q]) == 1
+
+
+def test_writer_creates_missing_nodes_only_in_one_hop_edge_patterns():
+    db = OneHopCreateDB()
+    plan = _plan()
+    writer = GraphWriter(db)
+    writer.apply_plan(plan, "scenario")
+    db.nodes["Source"].clear()
+    db.nodes["Entity"].clear()
+    db.edges = {edge for edge in db.edges if edge[2] not in {"FROM", "ABOUT"}}
+
+    writer.apply_plan(plan, "scenario")
+
+    assert any("-[:FROM]->" in query and "Source" in query for query in db.writes)
+    assert any("-[:ABOUT]->" in query and "Entity" in query for query in db.writes)
+    assert all("->" in query for query in db.writes if query.startswith("CREATE"))
 
 
 def test_apply_plan_links_claim_and_evidence_to_processing_provenance():
@@ -428,10 +451,11 @@ def test_apply_plan_rejects_invalid_deadline_value_before_any_write():
 
 
 class IntegrityDB(RecordingDB):
-    def __init__(self, claims=None, edges=()):
+    def __init__(self, claims=None, edges=(), invalidated_edges=()):
         super().__init__()
         self.claims = claims or {}
         self.edges = set(edges)
+        self.invalidated_edges = set(invalidated_edges)
 
     def query_one(self, cypher):
         self.queries.append(cypher)
@@ -459,14 +483,19 @@ class IntegrityDB(RecordingDB):
 
     def query(self, cypher, consistency="causal"):
         self.queries.append(cypher)
-        if "MATCH (a:Claim" in cypher and "[:SUPERSEDES]->" in cypher:
+        if "MATCH (a:Claim" in cypher and "-[r:SUPERSEDES]->" in cypher:
             source_id = int(cypher.split("id: ", 1)[1].split("}", 1)[0])
             return [
-                {"new_id": source_id, "old_id": old_id}
+                {
+                    "new_id": source_id,
+                    "old_id": old_id,
+                    "invalidated_by": "reviewed-repair"
+                    if (source_id, old_id) in self.invalidated_edges
+                    else None,
+                }
                 for new_id, old_id in sorted(self.edges)
                 if new_id == source_id
             ]
-        self.writes.append(cypher)
         return []
 
 
@@ -534,8 +563,7 @@ class FailureAfterStepDB:
                 claim["subject"],
                 claim["predicate"],
             )
-        node = re.search(r"\(\w+:(\w+) \{id: (\d+)", cypher)
-        if node:
+        for node in re.finditer(r"\(\w+:(\w+) \{id: (\d+)", cypher):
             label, node_id = node.groups()
             values = {
                 "Claim": self.claims,
@@ -545,7 +573,7 @@ class FailureAfterStepDB:
             }[label]
             values.add(int(node_id))
         edge = re.search(
-            r"\(\w+:(\w+) \{id: (\d+)\}\)-\[:(\w+)\]->\(\w+:(\w+) \{id: (\d+)\}\)",
+            r"\(\w+:(\w+) \{id: (\d+)[^}]*\}\)-\[:(\w+)\]->\(\w+:(\w+) \{id: (\d+)[^}]*\}\)",
             cypher,
         )
         if edge:
@@ -746,5 +774,22 @@ def test_apply_plan_rejects_cycle_using_existing_edges_before_writes():
 
     with pytest.raises(GraphIntegrityError, match="cycle"):
         GraphWriter(db).apply_plan(plan, "scenario")
+
+    assert db.writes == []
+
+
+def test_apply_plan_ignores_cycle_edge_invalidated_by_repair():
+    claims = {
+        key: {"id": graph_id(key), "subject": "project", "predicate": "status"}
+        for key in ("new", "old")
+    }
+    db = IntegrityDB(
+        claims=claims,
+        edges={(graph_id("old"), graph_id("new"))},
+        invalidated_edges={(graph_id("old"), graph_id("new"))},
+    )
+    plan = _integrity_plan([("new", "old")])
+
+    GraphWriter(db).apply_plan(plan, "scope-test")
 
     assert db.writes == []

@@ -14,6 +14,7 @@ from hydraclaim.pipeline import fetch_active_claims
 from hydraclaim.reconcile import plan_writes
 from hydraclaim.source_event_read import read_event
 from hydraclaim.source_events import SourceEventStore, _content_hash
+from hydraclaim.claims import validate_qualified_evidence
 from hydraclaim.subject_context import (
     canonical_subject_context,
     subject_context_digest,
@@ -283,6 +284,7 @@ def process_event(
                 raise ValueError(
                     f"extracted claim {index} subject is not an exact roster name"
                 )
+        validate_qualified_evidence(drafts, session["messages"])
     except Exception as exc:
         store.fail_extraction(extraction_key, "EXTRACT", exc)
         raise

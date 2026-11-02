@@ -18,6 +18,8 @@ from __future__ import annotations
 import hashlib
 import re
 
+from hydraclaim.claims import claim_qualifier
+
 OPEN = ""  # open-ended validity window (IS NULL is unsupported)
 
 
@@ -50,7 +52,8 @@ def source_key(source_kind: str, author: str) -> str:
 
 
 def claim_props(claim: dict, cid: str, recorded_at: str) -> dict:
-    return {
+    qualifier = claim_qualifier(claim["predicate"], claim.get("qualifier"))
+    properties = {
         "id": graph_id(cid),
         "key": cid,
         "subject": claim.get("subject", ""),
@@ -62,6 +65,9 @@ def claim_props(claim: dict, cid: str, recorded_at: str) -> dict:
         "status": claim.get("status", "active"),
         "confidence": claim.get("confidence", 0.5),
     }
+    if qualifier is not None:
+        properties["qualifier"] = qualifier
+    return properties
 
 
 def evidence_props(claim: dict, cid: str) -> dict:

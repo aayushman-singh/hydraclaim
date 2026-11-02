@@ -6,8 +6,9 @@ Endpoints:
   GET  /health                -> {"status": "ok"}
   GET  /scenarios             -> scenario list with sample questions for the UI
   GET  /graph                 -> entity/claim nodes + edges for the graph view
-  POST /ask {"question": str} -> retrieve.answer() result (route, answer,
-                                 citations, classification, probe)
+  POST /ask {"question": str, "qualifier": str} -> scoped retrieve.answer()
+  POST /ask {"question": str, "all_qualifiers": true} -> bounded listing
+                                 (route, answer, citations, classification, probe)
   POST /ingest                -> LLM extract + reconcile + write (needs LLM_API_KEY, LLM_BASE_URL, LLM_MODEL)
   POST /ingest/slack          -> Slack export -> sessions -> ingest pipeline
 
@@ -36,6 +37,7 @@ from hydraclaim.claim_read import (
     ClaimReadLimitError,
     ClaimScope,
 )
+from hydraclaim.claims import QualifierSelection
 from hydraclaim.db import HydraDBError
 from hydraclaim.errors import GraphIntegrityError
 from hydraclaim.llm import LLMError
@@ -119,10 +121,19 @@ def llm_classifier(question: str) -> dict:
 
 
 def handle_ask(
-    question: str, db, llm_fn, classification_mode: str = "heuristic"
+    question: str,
+    db,
+    llm_fn,
+    classification_mode: str = "heuristic",
+    *,
+    qualifier: str | QualifierSelection | None = None,
 ) -> dict[str, Any]:
     result = retrieve.answer(
-        db, question, classification_mode=classification_mode, llm_fn=llm_fn
+        db,
+        question,
+        classification_mode=classification_mode,
+        llm_fn=llm_fn,
+        qualifier=qualifier,
     )
     return result
 
@@ -263,7 +274,7 @@ def handle_graph(db) -> dict[str, Any]:
     claims = []
     edges: list[dict[str, Any]] = []
     for entity in entities:
-        scope = ClaimScope(subject=entity["name"])
+        scope = ClaimScope(subject=entity["name"], qualifier=QualifierSelection.ALL)
         selected = reader.read_claims(scope)
         claims.extend(selected)
         claim_ids = {claim.id for claim in selected}
@@ -446,11 +457,47 @@ def dispatch(
                 _error("invalid_request", "question too long (max 300 chars)"),
                 None,
             )
+        raw_qualifier = body.get("qualifier")
+        if raw_qualifier is not None and (
+            not isinstance(raw_qualifier, str) or not raw_qualifier.strip()
+        ):
+            return (
+                400,
+                _error("invalid_request", "'qualifier' must be a non-empty string"),
+                None,
+            )
+        raw_all_qualifiers = body.get("all_qualifiers", False)
+        if not isinstance(raw_all_qualifiers, bool):
+            return (
+                400,
+                _error("invalid_request", "'all_qualifiers' must be a boolean"),
+                None,
+            )
+        if raw_qualifier is not None and raw_all_qualifiers:
+            return (
+                400,
+                _error(
+                    "invalid_request",
+                    "'qualifier' and 'all_qualifiers' cannot be used together",
+                ),
+                None,
+            )
+        qualifier = QualifierSelection.ALL if raw_all_qualifiers else raw_qualifier
         blocked = _rate_limit("ask")
         if blocked:
             return blocked
         try:
-            return 200, handle_ask(question, db, llm_fn, classification_mode), None
+            return (
+                200,
+                handle_ask(
+                    question,
+                    db,
+                    llm_fn,
+                    classification_mode,
+                    qualifier=qualifier,
+                ),
+                None,
+            )
         except ClaimReadLimitError as exc:
             _log_claim_limit_failure(method, path, body, classification_mode, exc)
             return (

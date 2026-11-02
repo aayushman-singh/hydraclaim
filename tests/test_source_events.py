@@ -319,6 +319,22 @@ def test_capture_writes_exact_content_and_returns_state():
     assert "ingestion_kind: 'EXTRACTED'" in write
 
 
+def test_capture_creates_the_event_with_its_source_on_one_hop_backend():
+    class OneHopCaptureDB(CaptureDB):
+        def query(self, cypher):
+            if cypher.startswith("CREATE") and "-[:FROM]->" not in cypher:
+                raise RuntimeError("only one-hop CREATE is executable")
+            return super().query(cypher)
+
+    db = OneHopCaptureDB()
+    result = SourceEventStore(db).capture(event())
+    assert result["created"] is True
+    write = db.queries[-1]
+    assert "-[:FROM]->(source:Source" in write
+    assert "kind: 'slack'" in write
+    assert "author: 'Asha Rao'" in write
+
+
 def test_repeated_capture_does_not_write_duplicate_event():
     db = ContextCaptureDB(existing_hash=_content_hash(event()))
 

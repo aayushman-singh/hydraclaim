@@ -272,10 +272,15 @@ def test_dispatch_maps_claim_limit_for_graph_and_logs_subject(monkeypatch, caplo
 def test_dispatch_maps_array_or_null_classifier_response(
     classifier_response, caplog, monkeypatch
 ):
-    def run_reader(question, db, llm_fn, classification_mode):
+    def run_reader(question, db, llm_fn, classification_mode, *, qualifier=None):
         return (
             serve.ClaimReader(db)
-            .answer(question, classification_mode=classification_mode, llm_fn=llm_fn)
+            .answer(
+                question,
+                classification_mode=classification_mode,
+                llm_fn=llm_fn,
+                qualifier=qualifier,
+            )
             .as_dict()
         )
 
@@ -528,7 +533,7 @@ def test_handle_graph_shapes_nodes_and_edges():
                     "valid_to": "2026-05-18",
                 },
             ],
-            "[:SUPERSEDES]->": [{"src": 10, "dst": 11}],
+            "-[r:SUPERSEDES]->": [{"src": 10, "dst": 11}],
             "[:CONTRADICTS]->": [],
         }
     )

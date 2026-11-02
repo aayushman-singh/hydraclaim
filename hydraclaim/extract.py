@@ -25,7 +25,13 @@ from collections.abc import Sequence
 from datetime import date, datetime
 from pathlib import Path
 
-from hydraclaim.claims import PREDICATES, SOURCE_KINDS
+from hydraclaim.claims import (
+    claim_qualifier,
+    validate_qualified_evidence,
+    QUALIFIED_PREDICATES,
+    PREDICATES,
+    SOURCE_KINDS,
+)
 from hydraclaim.errors import ValidationError
 
 
@@ -138,7 +144,7 @@ def build_messages(
     ]
     active_lines = (
         "\n".join(
-            f"  {c['id']} | {c['subject']} | {c['predicate']} | {c['value']} | {c['valid_from']}"
+            f"  {c['id']} | {c['subject']} | {c['predicate']} | qualifier={c.get('qualifier')!r} | {c['value']} | {c['valid_from']}"
             for c in active_claims
         )
         or "  (none)"
@@ -170,6 +176,11 @@ Rules:
 - Only extract claims whose predicate is one of: {", ".join(sorted(PREDICATES))}.
 - subject: use exactly one of the KNOWN ENTITIES names. Do not invent phrases
   like "product launch deadline"; use "product launch".
+- qualifier: for {", ".join(sorted(QUALIFIED_PREDICATES))}, copy a short phrase
+  from that claim's quote which identifies the particular choice. Separate
+  choices must use different qualifiers and separate supported passages.
+  Never use one broad quote which names several proposed qualifiers.
+  For other predicates omit qualifier or use null.
 - value: the object of the claim, short and factual. Dates MUST be YYYY-MM-DD:
   convert natural-language dates using the message timestamp (a message dated
   2026-05-18 saying "October 17" becomes 2026-10-17). Never copy a natural
@@ -181,7 +192,9 @@ Rules:
 - explicitness 0..1 (1 = stated directly, lower = hedged or implied). confidence 0..1.
 - supersedes: if a claim explicitly corrects or replaces one of the ACTIVE CLAIMS
   (signals like "correction", "actually", "moving", "taking over", "instead"),
-  set it to that claim's id; otherwise null.
+  set it to that claim's id; otherwise null. The subject, predicate, and
+  qualifier must match the target. Same-source choices do not replace each
+  other without this explicit correction.
 - Extract status claims when a message says a project/person is
   "on track", "at risk", "blocked", "complete", "delayed", "green", or "red".
 - Never invent information. If nothing qualifies, return {{"claims": []}}.
@@ -189,12 +202,12 @@ Rules:
 
 Respond with strict JSON only, shape:
 {{"claims": [{{"subject", "predicate", "value", "valid_from", "quote", "author",
-"source_kind", "session_id", "msg_id", "explicitness", "confidence", "supersedes"}}]}}"""
+"source_kind", "session_id", "msg_id", "explicitness", "confidence", "supersedes", "qualifier"}}]}}"""
 
     user = f"""KNOWN ENTITIES:
 {json.dumps(roster, indent=2)}
 
-ACTIVE CLAIMS (id | subject | predicate | value | valid_from):
+ACTIVE CLAIMS (id | subject | predicate | qualifier | value | valid_from):
 {active_lines}
 
 SESSION {session["session_id"]} MESSAGES:
@@ -247,7 +260,7 @@ def parse_claims(
         where = f"claim[{i}] ({raw.get('predicate', '?') if isinstance(raw, dict) else '?'})"
         if not isinstance(raw, dict):
             raise ValueError(f"{where}: claim must be an object")
-        unknown = sorted(set(raw) - required_fields)
+        unknown = sorted(set(raw) - required_fields - {"qualifier"})
         if unknown:
             raise ValueError(f"{where}: unsupported fields: {unknown}")
         missing = sorted(required_fields - set(raw))
@@ -297,11 +310,13 @@ def parse_claims(
         except ValueError as exc:
             raise ValueError(f"{where}: {exc}") from exc
         supersedes = _validate_supersedes(raw["supersedes"], active_ids)
+        qualifier = claim_qualifier(raw["predicate"], raw.get("qualifier"))
 
         drafts.append(
             {
                 "subject": raw["subject"].strip(),
                 "predicate": raw["predicate"],
+                **({"qualifier": qualifier} if qualifier is not None else {}),
                 "value": value,
                 "valid_from": valid_from,
                 "quote": quote,
@@ -314,6 +329,7 @@ def parse_claims(
                 "supersedes": supersedes,
             }
         )
+    validate_qualified_evidence(drafts, session["messages"])
     return drafts, warnings
 
 

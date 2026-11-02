@@ -5,7 +5,7 @@ HydraClaim stores time-based claims for AI agent memory. It gives answers only w
 ## Language
 
 **Claim**:
-A fact statement about one subject with one predicate, one value, and one validity period.
+A fact statement about one subject with one predicate, one value, and one validity period. A decision or preference also has one qualifier.
 _Avoid_: Fact, memory item
 
 **Subject**:
@@ -15,6 +15,10 @@ _Avoid_: Topic, target
 **Predicate**:
 A controlled relation that states what a claim says about its subject.
 _Avoid_: Field, property
+
+**Qualifier**:
+The source-backed phrase that identifies one independent decision or preference for a subject.
+_Avoid_: Topic, inferred category
 
 **Evidence**:
 The exact source text that supports a claim.
@@ -45,7 +49,7 @@ A directed relation from a new claim to the older claim that it replaces.
 _Avoid_: Update, overwrite
 
 **Conflict**:
-An unresolved relation between active claims that give different values for the same subject and predicate.
+An unresolved relation between active claims that give different values for the same subject, predicate, and qualifier.
 _Avoid_: Mismatch, disagreement
 
 **Abstention**:

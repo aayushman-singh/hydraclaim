@@ -33,8 +33,9 @@ def _claim(
     confidence=0.95,
     supersedes=None,
     contradicts_with=(),
+    qualifier=None,
 ):
-    return {
+    claim = {
         "key": key,
         "subject": subject,
         "predicate": predicate,
@@ -48,6 +49,9 @@ def _claim(
         "supersedes": supersedes,
         "contradicts_with": list(contradicts_with),
     }
+    if qualifier is not None:
+        claim["qualifier"] = qualifier
+    return claim
 
 
 def payments_owner_conflict() -> dict:
@@ -1309,6 +1313,7 @@ def multi_vendor_decision() -> dict:
                         "the email platform will be SendGrid",
                         "Meeting notes",
                         "meeting",
+                        qualifier="email platform",
                     )
                 ],
             ),
@@ -1318,7 +1323,7 @@ def multi_vendor_decision() -> dict:
                 "slack",
                 "Tara Ellis",
                 "#email",
-                "Pushed back in the thread: Mailgun is the better deal and we should switch before contracting.",
+                "Pushed back in the thread: the email platform should switch to Mailgun before contracting.",
                 [
                     _claim(
                         "mv-2",
@@ -1326,9 +1331,10 @@ def multi_vendor_decision() -> dict:
                         "decided",
                         "Mailgun",
                         5,
-                        "Mailgun is the better deal",
+                        "the email platform should switch to Mailgun",
                         "Tara Ellis",
                         "slack",
+                        qualifier="email platform",
                     )
                 ],
             ),
@@ -1336,6 +1342,7 @@ def multi_vendor_decision() -> dict:
         "qa": [
             {
                 "question": "Which email platform was decided on?",
+                "qualifier": "email platform",
                 "answer": (
                     "Unresolved conflict: the planning meeting picked SendGrid, but Tara "
                     "later argued for Mailgun. Both decisions were recorded and never reconciled."
@@ -1346,6 +1353,7 @@ def multi_vendor_decision() -> dict:
             },
             {
                 "question": "Which email platform was initially decided on?",
+                "qualifier": "email platform",
                 "answer": "SendGrid",
                 "qtype": "temporal",
                 "gold_claim_keys": ["mv-1"],
@@ -1550,7 +1558,7 @@ def prefers_shift() -> dict:
                 "meeting",
                 "Meeting notes",
                 "fireflies",
-                "Samir Ali prefers TypeScript for greenfield services.",
+                "Samir Ali prefers TypeScript as the service language for greenfield services.",
                 [
                     _claim(
                         "pf-1",
@@ -1558,9 +1566,10 @@ def prefers_shift() -> dict:
                         "prefers",
                         "TypeScript",
                         0,
-                        "Samir Ali prefers TypeScript",
+                        "Samir Ali prefers TypeScript as the service language",
                         "Meeting notes",
                         "meeting",
+                        qualifier="service language",
                     )
                 ],
             ),
@@ -1570,7 +1579,7 @@ def prefers_shift() -> dict:
                 "slack",
                 "Samir Ali",
                 "#general",
-                "I've moved to Go for new services, overriding my earlier preference.",
+                "I've moved the service language to Go for new services, overriding my earlier preference.",
                 [
                     _claim(
                         "pf-2",
@@ -1578,10 +1587,11 @@ def prefers_shift() -> dict:
                         "prefers",
                         "Go",
                         8,
-                        "I've moved to Go for new services",
+                        "I've moved the service language to Go for new services",
                         "Samir Ali",
                         "slack",
                         supersedes="pf-1",
+                        qualifier="service language",
                     )
                 ],
             ),
@@ -1589,12 +1599,14 @@ def prefers_shift() -> dict:
         "qa": [
             {
                 "question": "What language does Samir Ali prefer now?",
+                "qualifier": "service language",
                 "answer": "Go",
                 "qtype": "knowledge_update",
                 "gold_claim_keys": ["pf-2"],
             },
             {
                 "question": "What language did Samir Ali prefer originally?",
+                "qualifier": "service language",
                 "answer": "TypeScript",
                 "qtype": "temporal",
                 "gold_claim_keys": ["pf-1"],

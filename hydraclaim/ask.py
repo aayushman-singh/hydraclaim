@@ -14,6 +14,7 @@ import argparse
 import json
 from collections.abc import Sequence
 
+from hydraclaim.claims import QualifierSelection
 from hydraclaim.errors import ValidationError
 
 
@@ -67,10 +68,21 @@ def main(argv: Sequence[str] | None = None) -> int | None:
     parser.add_argument(
         "--repl", action="store_true", help="read questions from stdin in a loop"
     )
+    qualifier_group = parser.add_mutually_exclusive_group()
+    qualifier_group.add_argument(
+        "--qualifier",
+        help="select one exact decision or preference scope",
+    )
+    qualifier_group.add_argument(
+        "--all-qualifiers",
+        action="store_true",
+        help="list all decision or preference scopes",
+    )
     args = parser.parse_args(argv)
 
     classification_mode = "llm" if args.llm else "heuristic"
     llm_fn = _llm_classifier if args.llm else None
+    qualifier = QualifierSelection.ALL if args.all_qualifiers else args.qualifier
 
     from hydraclaim import config
 
@@ -94,6 +106,7 @@ def main(argv: Sequence[str] | None = None) -> int | None:
                         question,
                         classification_mode=classification_mode,
                         llm_fn=llm_fn,
+                        qualifier=qualifier,
                     ),
                     args.verbose,
                 )
@@ -104,7 +117,11 @@ def main(argv: Sequence[str] | None = None) -> int | None:
 
     with connect() as db:
         result = answer(
-            db, args.question, classification_mode=classification_mode, llm_fn=llm_fn
+            db,
+            args.question,
+            classification_mode=classification_mode,
+            llm_fn=llm_fn,
+            qualifier=qualifier,
         )
 
     _print_result(result, args.verbose)

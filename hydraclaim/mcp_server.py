@@ -7,6 +7,7 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 from mcp.server import MCPServer
+from hydraclaim.claims import QualifierSelection
 
 
 def create_server(
@@ -34,17 +35,37 @@ def create_server(
         description="Conflict-aware temporal memory backed by HydraDB.",
         instructions=(
             "Use ask_claim to get supported answers with citations. "
+            "Pass qualifier for one exact decision or preference scope, or set "
+            "all_qualifiers=true for an intentional bounded listing. Do not pass both. "
             "Use record_source_event only when the user asks you to save a source."
         ),
     )
 
     @server.tool()
-    def ask_claim(question: str) -> dict[str, Any]:
+    def ask_claim(
+        question: str,
+        qualifier: str | None = None,
+        all_qualifiers: bool = False,
+    ) -> dict[str, Any]:
         """Answer one question from the claim graph with evidence and route data."""
         if not question.strip():
             raise ValueError("question must be a non-empty string")
+        if qualifier is not None and (
+            not isinstance(qualifier, str) or not qualifier.strip()
+        ):
+            raise ValueError("qualifier must be a non-empty string")
+        if not isinstance(all_qualifiers, bool):
+            raise ValueError("all_qualifiers must be a boolean")
+        if qualifier is not None and all_qualifiers:
+            raise ValueError("qualifier and all_qualifiers cannot be used together")
+        selection = QualifierSelection.ALL if all_qualifiers else qualifier
         with connect_fn() as db:
-            return answer_fn(db, question, classification_mode="heuristic")
+            return answer_fn(
+                db,
+                question,
+                classification_mode="heuristic",
+                qualifier=selection,
+            )
 
     @server.tool()
     def record_source_event(
