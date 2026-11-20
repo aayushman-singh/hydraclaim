@@ -460,6 +460,7 @@ def _validate_plan(plan: object, scenario_id: object, entities: object) -> list[
 
 
 def _validate_evidence_sources(
+    db: Any,
     drafts: list[dict],
     source_event_keys: dict[str, str] | None,
     extraction_key: str | None,
@@ -477,8 +478,38 @@ def _validate_evidence_sources(
                 f"missing source event key for evidence message {message_id!r}"
             )
         cited_events.add(event_key)
-    if extraction_key is not None and len(cited_events) != 1:
+    if extraction_key is None:
+        for key in cited_events:
+            event_id = graph_id(key)
+            rows = db.query(
+                f"MATCH (e:SourceEvent {{id: {event_id}}}) "
+                "RETURN e.id AS id, e.key AS key LIMIT 2"
+            )
+            if rows != [{"id": event_id, "key": key}]:
+                raise GraphIntegrityError(
+                    "evidence source event identity does not match"
+                )
+        return
+    if len(cited_events) != 1:
         raise ValueError("one extraction cannot cite multiple source events")
+    key = cited_events.pop()
+    extraction_id = graph_id(extraction_key)
+    rows = db.query(
+        f"MATCH (x:Extraction {{id: {extraction_id}}})-[:READ_FROM]->(e:SourceEvent) "
+        "RETURN x.id AS extraction_id, x.key AS extraction_key, "
+        "e.id AS event_id, e.key AS event_key LIMIT 2"
+    )
+    if rows != [
+        {
+            "extraction_id": extraction_id,
+            "extraction_key": extraction_key,
+            "event_id": graph_id(key),
+            "event_key": key,
+        }
+    ]:
+        raise GraphIntegrityError(
+            "evidence must cite the extraction's single recorded source event"
+        )
 
 
 def _validate_relation_endpoints(
@@ -1734,7 +1765,9 @@ class GraphWriter:
         errors = _validate_plan(plan, scenario_id, entities)
         if errors:
             raise ValueError(f"invalid write plan for {scenario_id!r}: {errors}")
-        _validate_evidence_sources(plan["create"], source_event_keys, extraction_key)
+        _validate_evidence_sources(
+            self._db, plan["create"], source_event_keys, extraction_key
+        )
         claim_metadata = {
             draft["id"]: (
                 draft["subject"],
