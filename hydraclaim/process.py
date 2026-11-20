@@ -8,7 +8,7 @@ import json
 import os
 from collections.abc import Callable, Sequence
 
-from hydraclaim.extract import extract_session
+from hydraclaim.extract import EXTRACTION_PROMPT_VERSION, extract_session
 from hydraclaim.graph_write import GraphWriter
 from hydraclaim.pipeline import fetch_active_claims
 from hydraclaim.reconcile import plan_writes
@@ -202,7 +202,7 @@ def process_event(
         event_key,
         provider,
         model,
-        "extract-v1",
+        EXTRACTION_PROMPT_VERSION,
         reprocess=reprocess,
         **start_options,
     )

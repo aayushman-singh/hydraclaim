@@ -35,6 +35,9 @@ from hydraclaim.claims import (
 from hydraclaim.errors import ValidationError
 
 
+EXTRACTION_PROMPT_VERSION = "extract-v2"
+
+
 _MONTHS = {
     "january": 1,
     "february": 2,
@@ -174,6 +177,12 @@ def build_messages(
 
 Rules:
 - Only extract claims whose predicate is one of: {", ".join(sorted(PREDICATES))}.
+- Extract prefers only when the quoted speaker expresses a standing preference.
+  A request, permission, or restriction for the current task does not establish
+  a preference for future tasks. Repetition or an existing claim is not proof.
+  Preserve an explicit decision about a particular matter as decided when the
+  speaker states that choice. A request to perform work is not such a decision.
+  If the message only assigns work and sets limits on that work, return no claims.
 - subject: use exactly one of the KNOWN ENTITIES names. Do not invent phrases
   like "product launch deadline"; use "product launch".
 - qualifier: for {", ".join(sorted(QUALIFIED_PREDICATES))}, copy a short phrase

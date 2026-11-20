@@ -21,7 +21,11 @@ from pathlib import Path
 from hydraclaim.claims import SOURCE_KINDS, claim_qualifier
 from hydraclaim.db import HydraDB
 from hydraclaim.errors import PipelineInputError
-from hydraclaim.extract import _parse_timestamp, extract_session
+from hydraclaim.extract import (
+    EXTRACTION_PROMPT_VERSION,
+    _parse_timestamp,
+    extract_session,
+)
 from hydraclaim.graph_write import GraphWriter
 from hydraclaim.reconcile import plan_writes
 from hydraclaim.source_events import SourceEventStore
@@ -181,7 +185,7 @@ def run_pipeline(
                 event_key,
                 "openai-compatible",
                 os.environ.get("LLM_MODEL", ""),
-                "extract-v1",
+                EXTRACTION_PROMPT_VERSION,
             )
             extraction_key = attempt["extraction_key"]
             if step_hook:

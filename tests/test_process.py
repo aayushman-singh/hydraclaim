@@ -92,7 +92,7 @@ def test_process_event_uses_required_extractor_and_records_explicit_metadata():
         [],
     ]
     assert _Store.actions == [
-        ("start", "event", "jarvis-codex", "codex-test", "extract-v1"),
+        ("start", "event", "jarvis-codex", "codex-test", "extract-v2"),
         ("complete", "event:extraction:1", []),
     ]
 
@@ -118,7 +118,7 @@ def test_process_event_records_extractor_failure_and_stops():
         "event",
         "jarvis-codex",
         "codex-test",
-        "extract-v1",
+        "extract-v2",
     )
     assert _Store.actions[1][:3] == (
         "fail",
