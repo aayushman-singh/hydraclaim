@@ -10,7 +10,7 @@
 //             valid_from, valid_to,                          // event time (bitemporal)
 //             recorded_at,                                   // ingestion time
 //             status,                                        // active | superseded | disputed
-//             confidence})
+//             confidence, invalidated_by})                   // optional repair identifier
 // (:Evidence {id, quote, ts, session_id, msg_id,
 //             extraction_confidence, explicitness})
 // (:Source   {id, kind, author, channel})                    // kind: slack | linear | meeting

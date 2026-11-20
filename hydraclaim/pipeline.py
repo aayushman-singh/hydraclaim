@@ -18,7 +18,7 @@ import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from hydraclaim.claims import SOURCE_KINDS, claim_qualifier
+from hydraclaim.claims import SOURCE_KINDS, claim_qualifier, is_invalidated
 from hydraclaim.db import HydraDB
 from hydraclaim.errors import PipelineInputError
 from hydraclaim.extract import (
@@ -129,9 +129,14 @@ def fetch_active_claims(db: HydraDB) -> list[dict]:
     rows = db.query("""
 MATCH (c:Claim {status: 'active'})-[:ABOUT]->(e:Entity)
 OPTIONAL MATCH (c)-[:SUPPORTED_BY]->(ev:Evidence)-[:FROM]->(s:Source)
-RETURN c.key AS id, e.name AS subject, c.predicate AS predicate,
+RETURN c.key AS id, e.name AS subject, c.predicate AS predicate, c.invalidated_by AS invalidated_by,
        c.qualifier AS qualifier, c.value AS value, c.valid_from AS valid_from,
        s.kind AS source_kind, s.author AS author""")
+    rows = [
+        row
+        for row in rows
+        if not is_invalidated(row.pop("invalidated_by", None), "claim")
+    ]
     for row in rows:
         qualifier = claim_qualifier(row["predicate"], row.get("qualifier"))
         if qualifier is not None:

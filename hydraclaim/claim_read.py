@@ -15,6 +15,7 @@ from hydraclaim.claims import (
     QualifierSelection,
     canonical_qualifier,
     claim_qualifier,
+    is_invalidated,
     requires_qualifier,
 )
 from hydraclaim.cypher import to_cypher_literal as lit
@@ -138,12 +139,7 @@ class AnswerResult:
 
 
 def _invalidated_relation(row: dict) -> bool:
-    marker = row.get("invalidated_by")
-    if marker is None:
-        return False
-    if not isinstance(marker, str) or not marker.strip():
-        raise GraphIntegrityError("malformed relation invalidation marker")
-    return True
+    return is_invalidated(row.get("invalidated_by"), "relation")
 
 
 def _chain_depth(edges: list[tuple[int, int]], ids: set[int]) -> int:
@@ -200,6 +196,30 @@ class ClaimReader:
             for row in rows
         )
 
+    def _visible_rows(
+        self,
+        query: str,
+        limit: int,
+        markers: tuple[tuple[str, str], ...],
+    ) -> list[dict]:
+        """Return at most limit + 1 visible rows from a stable ordered query."""
+        size = limit + 1
+        offset = 0
+        visible = []
+        while len(visible) < size:
+            page = f" SKIP {offset}" if offset else ""
+            rows = self._db.query(f"{query}{page} LIMIT {size}")
+            for row in rows:
+                invalidated = [
+                    is_invalidated(row.get(field), kind) for field, kind in markers
+                ]
+                if not any(invalidated):
+                    visible.append(row)
+            if len(rows) < size:
+                break
+            offset += len(rows)
+        return visible[:size]
+
     def read_claims(self, scope: ClaimScope) -> tuple[ClaimView, ...]:
         if (
             not isinstance(scope.subject, str)
@@ -220,19 +240,20 @@ class ClaimReader:
                 f"(c.recorded_at <= {lit(scope.as_of)} "
                 f"AND (c.valid_to = '' OR c.valid_to > {lit(scope.as_of)}))"
             )
-        rows = self._db.query(
+        rows = self._visible_rows(
             f"""
 MATCH (c:Claim)-[:ABOUT]->(e:Entity)
 WHERE {" AND ".join(clauses)}
 OPTIONAL MATCH (c)-[:SUPPORTED_BY]->(ev:Evidence)-[:FROM]->(s:Source)
 RETURN c.id AS id, c.key AS key, e.name AS subject, c.predicate AS predicate,
        c.qualifier AS qualifier, c.value AS value, c.valid_from AS valid_from, c.valid_to AS valid_to,
-       c.status AS status, c.confidence AS confidence,
+       c.status AS status, c.confidence AS confidence, c.invalidated_by AS invalidated_by,
        ev.quote AS quote, ev.explicitness AS explicitness,
        ev.extraction_confidence AS extraction_confidence,
        s.kind AS source_kind, s.author AS author
-ORDER BY c.valid_from DESC, c.id DESC
-LIMIT {int(scope.limit) + 1}"""
+ORDER BY c.valid_from DESC, c.id DESC""",
+            scope.limit,
+            (("invalidated_by", "claim"),),
         )
         rows = sorted(
             rows,
@@ -318,13 +339,18 @@ LIMIT {int(scope.limit) + 1}"""
                     ]
                 )
             predicate_clause = "WHERE " + " AND ".join(predicates)
-            relation_rows = self._db.query(
+            relation_rows = self._visible_rows(
                 f"""
 MATCH (a:Claim {{id: {int(claim_id)}}}){relation_match}(b:Claim)
 {predicate_clause}
-RETURN {return_fields}
-ORDER BY a.id ASC, b.id ASC
-LIMIT {int(scope.limit) + 1}"""
+RETURN {return_fields}, a.invalidated_by AS source_marker, b.invalidated_by AS target_marker
+ORDER BY a.id ASC, b.id ASC""",
+                scope.limit,
+                (
+                    ("invalidated_by", "relation"),
+                    ("source_marker", "claim"),
+                    ("target_marker", "claim"),
+                ),
             )
             if len(relation_rows) > scope.limit:
                 raise ClaimReadLimitError(
@@ -336,15 +362,13 @@ LIMIT {int(scope.limit) + 1}"""
                     limit=scope.limit,
                 )
             for row in relation_rows:
-                if _invalidated_relation(row):
-                    continue
                 target_key = "old_id" if relation_type == "SUPERSEDES" else "b_id"
                 target_id = int(row.get(target_key, row.get("dst")))
                 if target_id not in claim_ids:
                     continue
                 source = self._read_claim_scope_membership(claim_id, scope)
                 target = self._read_claim_scope_membership(target_id, scope)
-                if target is None:
+                if source is None or target is None:
                     continue
                 if source["qualifier"] != target["qualifier"]:
                     raise GraphIntegrityError("claim relation crosses qualifier scopes")
@@ -425,20 +449,26 @@ LIMIT {int(scope.limit) + 1}"""
             expanded_depth[current_id] = current_depth
             if current_depth > MAX_CHAIN_DEPTH:
                 continue
-            rows = self._db.query(
+            rows = self._visible_rows(
                 f"""
 MATCH (current:Claim {{id: {current_id}}})-[r:SUPERSEDES]->(older:Claim)
 WHERE {" AND ".join(predicate_clauses)}
 OPTIONAL MATCH (older)-[:ABOUT]->(older_entity:Entity)
 OPTIONAL MATCH (older)-[:SUPPORTED_BY]->(older_ev:Evidence)-[:FROM]->(older_source:Source)
-RETURN older.id AS id, older.value AS value,
+RETURN older.id AS id, older.value AS value, older.invalidated_by AS older_marker,
+       current.invalidated_by AS current_marker,
        r.invalidated_by AS invalidated_by, older.qualifier AS qualifier,
        older.key AS key, older.valid_from AS valid_from, older.valid_to AS valid_to,
        older_entity.name AS subject, older.predicate AS predicate,
        older_ev.quote AS quote, older_source.kind AS source_kind,
        older_source.author AS author
-ORDER BY older.valid_from DESC, older.id DESC
-LIMIT {int(scope.limit) + 1}"""
+ORDER BY older.valid_from DESC, older.id DESC""",
+                scope.limit,
+                (
+                    ("invalidated_by", "relation"),
+                    ("current_marker", "claim"),
+                    ("older_marker", "claim"),
+                ),
             )
             if len(rows) > scope.limit:
                 raise ClaimReadLimitError(
@@ -455,8 +485,11 @@ LIMIT {int(scope.limit) + 1}"""
                 reverse=True,
             )
             for row in rows:
-                if _invalidated_relation(row):
-                    continue
+                row = {
+                    k: v
+                    for k, v in row.items()
+                    if k not in ("older_marker", "current_marker")
+                }
                 older_id = int(row["id"])
                 if row["predicate"] != start_predicate:
                     continue
@@ -517,7 +550,8 @@ LIMIT {int(scope.limit) + 1}"""
             f"""
 MATCH (c:Claim {{id: {int(claim_id)}}})-[:ABOUT]->(e:Entity {{name: {lit(scope.subject)}}})
 WHERE {" AND ".join(clauses)}
-RETURN c.id AS id, e.name AS subject, c.predicate AS predicate, c.qualifier AS qualifier
+RETURN c.id AS id, e.name AS subject, c.predicate AS predicate, c.qualifier AS qualifier,
+       c.invalidated_by AS invalidated_by
 LIMIT {int(scope.limit) + 1}"""
         )
         if len(rows) > scope.limit:
@@ -528,6 +562,8 @@ LIMIT {int(scope.limit) + 1}"""
                 limit=scope.limit,
             )
         for row in rows:
+            if is_invalidated(row.get("invalidated_by"), "claim"):
+                continue
             if int(row["id"]) != int(claim_id):
                 continue
             if row.get("subject") != scope.subject:

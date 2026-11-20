@@ -26,6 +26,8 @@ from __future__ import annotations
 from enum import Enum
 import re
 
+from hydraclaim.errors import GraphIntegrityError
+
 PREDICATES = frozenset(
     {
         "owned_by",
@@ -49,6 +51,15 @@ QUALIFIED_PREDICATES = frozenset({"decided", "prefers"})
 
 class QualifierSelection(Enum):
     ALL = "all"
+
+
+def is_invalidated(marker: object, kind: str) -> bool:
+    """Read the repair annotation on a claim or relation."""
+    if marker is None:
+        return False
+    if not isinstance(marker, str) or not marker.strip():
+        raise GraphIntegrityError(f"malformed {kind} invalidation marker")
+    return True
 
 
 def requires_qualifier(predicate: str) -> bool:

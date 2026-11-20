@@ -29,7 +29,7 @@ from hydraclaim.claim_read import (
     build_fast_answer,
     build_temporal_answer,
 )
-from hydraclaim.claims import QualifierSelection
+from hydraclaim.claims import QualifierSelection, is_invalidated
 from hydraclaim.db import HydraDB
 
 
@@ -94,11 +94,14 @@ def fetch_chain(
         rows = db.query(
             f"""
 MATCH (c:Claim {{id: {int(claim_id)}}})-[:ABOUT]->(e:Entity)
-RETURN e.name AS subject, c.predicate AS predicate, c.qualifier AS qualifier
+RETURN e.name AS subject, c.predicate AS predicate, c.qualifier AS qualifier,
+       c.invalidated_by AS invalidated_by
 LIMIT 2"""
         )
         if not isinstance(rows, list) or len(rows) != 1:
             raise ValueError(f"cannot resolve claim scope for claim_id={claim_id!r}")
+        if is_invalidated(rows[0].get("invalidated_by"), "claim"):
+            return []
         resolved_subject = rows[0].get("subject")
         resolved_predicate = rows[0].get("predicate")
         if not isinstance(resolved_subject, str) or not resolved_subject.strip():

@@ -26,6 +26,8 @@ A bounded writer-owned repair preserves Claim keys, Evidence quotes, Sources, an
 
 A false historical relation stays stored with an explicit repair marker. Only a proved false closure is restored. Private before and after receipts retain the reviewed mappings and any partial effects. The operator pauses the ordinary writer during apply.
 
+A repair can mark a Claim that was false from its creation with `invalidated_by`. The value is the nonempty repair identifier. Claim answers, history comparisons, relation traversal, and extraction context exclude the Claim for every date. The stored status and dates keep their original values. Raw graph audit reads retain the Claim, its marker, its Evidence, and the original Extraction. A malformed marker causes an integrity error.
+
 ## Consequences
 
 A Claim with an unrelated qualifier stays independent. A read can abstain or fail explicitly when it cannot identify valid scope. No old-schema mode, inferred scope, hidden retry, or substituted answer is available.
