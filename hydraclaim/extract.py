@@ -181,12 +181,16 @@ Rules:
   A request, permission, or restriction for the current task does not establish
   a preference for future tasks. Repetition or an existing claim is not proof.
   Preserve an explicit decision about a particular matter as decided when the
-  speaker states that choice. A request to perform work is not such a decision.
+  speaker states that choice. Include conditions and required outcomes that
+  define the choice, even when the next sentence supplies them. Quote the
+  complete supporting passage. Keep instructions for the current reply out
+  of the decision. A request to perform work is not such a decision.
   If the message only assigns work and sets limits on that work, return no claims.
 - subject: use exactly one of the KNOWN ENTITIES names. Do not invent phrases
   like "product launch deadline"; use "product launch".
 - qualifier: for {", ".join(sorted(QUALIFIED_PREDICATES))}, copy a short phrase
-  from that claim's quote which identifies the particular choice. Separate
+  from that claim's quote which names the topic. Keep the selected value and
+  conditions in value. Use the shortest phrase that distinguishes the topic. Separate
   choices must use different qualifiers and separate supported passages.
   Never use one broad quote which names several proposed qualifiers.
   For other predicates omit qualifier or use null.
