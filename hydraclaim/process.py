@@ -299,7 +299,9 @@ def process_event(
             event_key,
             roster,
             extraction_key=extraction_key,
-            source_event_keys={event_key: event_key},
+            source_event_keys={
+                message["msg_id"]: event_key for message in session["messages"]
+            },
         )
     except Exception as exc:
         store.fail_extraction(extraction_key, "WRITE", exc)

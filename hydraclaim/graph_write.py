@@ -459,6 +459,28 @@ def _validate_plan(plan: object, scenario_id: object, entities: object) -> list[
     return errors
 
 
+def _validate_evidence_sources(
+    drafts: list[dict],
+    source_event_keys: dict[str, str] | None,
+    extraction_key: str | None,
+) -> None:
+    if not drafts or (source_event_keys is None and extraction_key is None):
+        return
+    if source_event_keys is None:
+        raise ValueError("extracted claims require source event keys")
+    cited_events = set()
+    for draft in drafts:
+        message_id = draft.get("msg_id")
+        event_key = source_event_keys.get(message_id)
+        if not isinstance(event_key, str) or not event_key.strip():
+            raise ValueError(
+                f"missing source event key for evidence message {message_id!r}"
+            )
+        cited_events.add(event_key)
+    if extraction_key is not None and len(cited_events) != 1:
+        raise ValueError("one extraction cannot cite multiple source events")
+
+
 def _validate_relation_endpoints(
     db: Any,
     plan: dict,
@@ -1712,6 +1734,7 @@ class GraphWriter:
         errors = _validate_plan(plan, scenario_id, entities)
         if errors:
             raise ValueError(f"invalid write plan for {scenario_id!r}: {errors}")
+        _validate_evidence_sources(plan["create"], source_event_keys, extraction_key)
         claim_metadata = {
             draft["id"]: (
                 draft["subject"],
@@ -1771,10 +1794,8 @@ class GraphWriter:
                     f"-[:PRODUCED_BY]->(extraction:Extraction "
                     f"{{id: {graph_id(extraction_key)}}})"
                 )
-            source_event_key = (source_event_keys or {}).get(
-                str(draft.get("msg_id", ""))
-            )
-            if source_event_key:
+            if source_event_keys is not None:
+                source_event_key = source_event_keys[draft["msg_id"]]
                 self._db.query(
                     f"CREATE (evidence:Evidence {{id: {evidence_props(draft, claim_id)['id']}}})"
                     f"-[:QUOTED_FROM]->(event:SourceEvent "
